@@ -4,7 +4,6 @@ import sys
 import re
 import argparse
 from pathlib import Path
-from typing import Union, List
 
 # Third party library imports
 from prompt_toolkit import PromptSession
