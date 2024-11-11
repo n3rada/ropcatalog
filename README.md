@@ -4,7 +4,7 @@
 It was built during the [EXP-301 course](https://www.offsec.com/courses/exp-301/), which focuses on exploit development. The tool is specifically tailored and designed for working with x86 ROP chains.
 
 ## Installation
-Thought for simplicity:
+Designed for simplicity:
 
 ```shell
 pipx install 'git+https://github.com/n3rada/rp_catalog.git'
