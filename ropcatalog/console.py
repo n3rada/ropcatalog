@@ -12,8 +12,8 @@ from prompt_toolkit.history import ThreadedHistory, InMemoryHistory
 from prompt_toolkit.cursor_shapes import CursorShape
 
 # Local library imports
-from rp_catalog.core import gadgets
-from rp_catalog.core import utils
+from ropcatalog.core import gadgets
+from ropcatalog.core import utils
 
 
 class Console:
@@ -63,6 +63,7 @@ class Console:
 
         if args is not None and args.endswith(" /n"):
             args = args.replace(" /n", "")
+            print("[i] Filtering disabled")
             filtering = False
 
         results = self._commands[cmd](args) or []
@@ -91,6 +92,9 @@ class Console:
         print("Available commands:")
         for cmd, func in self._commands.items():
             print(f"  {cmd:<5} - {func.__doc__}")
+
+        print("\nModifiers:")
+        print("  /n   - Disables filtering for bad operations (e.g., jump esp /n).")
 
     def exact_search(self, instructions: str) -> list:
         """Exact search for gadgets (e.g., ? pop eax ; ret)"""
@@ -353,7 +357,8 @@ class Console:
         print()
         while True:
             try:
-                command = session.prompt("[rp_catalog]# ").strip()
+                command = session.prompt("[ropcatalog]# ").strip() or "help"
+
                 results = self.execute(command)
 
                 if results:

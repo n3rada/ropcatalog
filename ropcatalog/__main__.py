@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Local library imports
-from rp_catalog import console
+from ropcatalog import console
 
 
 def main() -> None:

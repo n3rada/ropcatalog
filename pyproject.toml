@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "rp-catalog"
+name = "ropcatalog"
 version = "1.0.0"
-description = "Finding and classifying gadgets from rp++ output file."
+description = " Finding and classifying gadgets from rp++ output file with some regex, with a CLI."
 authors = ["n3rada <72791564+n3rada@users.noreply.github.com>"]
 license = "GPL-3.0-only"
 readme = "README.md"
@@ -10,11 +10,9 @@ readme = "README.md"
 python = ">=3.9"
 prompt-toolkit = "^3.0.48"
 
-
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-
 [tool.poetry.scripts]
-rp_catalog = "rp_catalog.console:run"
+ropcatalog = "ropcatalog.console:run"
