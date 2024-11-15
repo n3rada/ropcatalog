@@ -32,21 +32,6 @@ Then, open your catalog with ASLR considerations (`--offset`) and output unique 
 ropcatalog ~/dump/libeay32IBM019.txt -b "\x00\x09\x0a\x0b\x0c\x0d\x20" -u -p -o
 ```
 
-```txt
-[+] Bad characters: ['00', '09', '0a', '0b', '0c', '0d', '20']
-[*] Parsing libeay32IBM019.txt, looking for usable gadgets
-
-[libeay32IBM019] Parsing completed:
-[+] Total gadgets extracted: 57700
-[+] Gadgets excluded: 3730
-   |-> 1681 gadgets had large 'retn' values
-   |-> 2049 gadgets contained bad characters
-[+] Total of 57700 gadgets loaded
-[+] Filtered to 24974 unique gadgets based on instructions.
-
-[ropcatalog]#
-```
-
 If you forgot how to browse your own catalog, use `help`:
 ```shell
 [ropcatalog]# help
@@ -62,11 +47,12 @@ Available commands:
   inc   - Find gadgets that increment a register (e.g., inc eax)
   dec   - Find gadgets that decrement a register (e.g., dec eax)
   deref - Find gadgets that dereference a register (e.g., mov eax, [eax])
-  re    - Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)
+  .     - Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)
   swap  - Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>)
   zero  - Find gadgets that zero the given register
   ppr   - Find gadgets with pop-pop-ret sequences (e.g., pop eax ; pop ebx ; ret)
   jump  - Find jump-related gadgets (e.g., jmp esp, call esp, jmp [esp+0x10], etc.)
+  push  - This method finds gadgets that push a register onto the stack without any other pop following.
   pop   - This method finds gadgets that load a value from the stack into a specified register, typically through the pop instruction.
 
 Modifiers:
