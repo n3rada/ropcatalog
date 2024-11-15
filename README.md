@@ -15,7 +15,7 @@ Or, without dependency conflicts:
 pip install 'ropcatalog@git+https://github.com/n3rada/ropcatalog.git'
 ```
 
-Then, you can directly use it by calling its name
+Then, you can use `ropcatalog` to help you leaf through the gadget catalog:
 
 ```shell
 ropcatalog ~/dump/libeay32IBM019.txt

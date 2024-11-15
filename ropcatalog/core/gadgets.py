@@ -33,8 +33,12 @@ def is_register_modified(reg: str, instructions: list) -> bool:
     # Check if any of the main or sub-registers are modified in the instructions
     for instr in instructions:
         for reg_check in registers_to_check:
-            if reg_check in instr:
-                return True
+            if "," in instr:
+                if reg_check in instr.split(",")[0]:
+                    return True
+            else:
+                if f"pop {reg_check}" in instr:
+                    return True
     return False
 
 
@@ -46,6 +50,7 @@ class Gadget:
     # or depends on unpredictable conditions
     # is considered bad because it introduces instability into the exploit.
     BAD_OPS = {
+        "int3",
         "call",
         "leave",
         "loop",
@@ -264,7 +269,6 @@ class Gadgets:
         with open(file_path, mode="r", encoding="utf-8") as file_obj:
             file_content = file_obj.read()
 
-        big_retn_count = 0
         bad_char_count = 0
 
         results = []
@@ -277,11 +281,6 @@ class Gadgets:
                 module=file_path.stem,
             )
 
-            # Ensure no big retn
-            if gadget.has_big_retn():
-                big_retn_count += 1
-                continue
-
             # If any bad character is present in the address
             if self._bad_characters is not None and gadget.has_bad_chars_in_address(
                 self._bad_characters
@@ -291,12 +290,9 @@ class Gadgets:
 
             results.append(gadget)
 
-        total_excluded = big_retn_count + bad_char_count
         print(f"\n[{file_path.stem}] Parsing completed:")
         print(f"[+] Total gadgets extracted: {len(results)}")
-        print(f"[+] Gadgets excluded: {total_excluded}")
-        print(f"   |-> {big_retn_count} gadgets had large 'retn' values")
-        print(f"   |-> {bad_char_count} gadgets contained bad characters")
+        print(f"[+] {bad_char_count} gadgets contained bad characters")
 
         return results
 

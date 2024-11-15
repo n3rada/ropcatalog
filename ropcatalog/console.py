@@ -35,11 +35,12 @@ class Console:
             "inc": self.increment_register,
             "dec": self.decrement_register,
             "deref": self.dereference_register,
-            "re": self.regex_search,
+            ".": self.regex_search,
             "swap": self.swap_register,
             "zero": self.zero,
             "ppr": self.find_ppr,
             "jump": self.find_jump_gadgets,
+            "push": self.push_register,
             "pop": self.pop_to_register,
         }
 
@@ -116,6 +117,7 @@ class Console:
 
         patterns = [
             rf"mov (\w+), {reg}",  # mov <reg>, reg
+            rf"lea (\w+), \[{reg}.+?\]",
         ]
 
         for gadget in self._gadgets:
@@ -123,22 +125,21 @@ class Console:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    matched_reg = match.group(1)  # Destination register from the regex
+                    matched_reg = match.group(1)
 
-                    # Ensure the matched instruction exists in the gadget's instructions
-                    if matched_instruction in gadget.instructions:
-                        matched_index = gadget.instructions.index(matched_instruction)
+                    if matched_instruction not in gadget.instructions:
+                        continue
 
-                        # Take only the instructions AFTER the matched one
-                        remaining_instructions = gadget.instructions[
-                            matched_index + 1 :
-                        ]
+                    matched_index = gadget.instructions.index(matched_instruction)
 
-                        # Check if the register is modified in the remaining instructions
-                        if not gadgets.is_register_modified(
-                            matched_reg, remaining_instructions
-                        ):
-                            results.append(gadget)
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
+
+                    # Check if the register is modified in the remaining instructions
+                    if not gadgets.is_register_modified(
+                        matched_reg, remaining_instructions
+                    ):
+                        results.append(gadget)
 
             # Now, handle the 'push <reg>' case
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
@@ -157,6 +158,7 @@ class Console:
 
         patterns = [
             rf"mov (\w+), {reg}",
+            rf"lea (\w+), \[{reg}.+?\]",
         ]
 
         for gadget in self._gadgets:
@@ -164,24 +166,21 @@ class Console:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    matched_reg = match.group(1)  # Destination register from the regex
+                    matched_reg = match.group(1)
 
-                    # Ensure the matched instruction exists in the gadget's instructions
-                    if matched_instruction in gadget.instructions:
-                        matched_index = gadget.instructions.index(matched_instruction)
+                    if matched_instruction not in gadget.instructions:
+                        continue
 
-                        # Take only the instructions AFTER the matched one
-                        remaining_instructions = gadget.instructions[
-                            matched_index + 1 :
-                        ]
+                    matched_index = gadget.instructions.index(matched_instruction)
 
-                        # Check if the register is modified in the remaining instructions
-                        if not gadgets.is_register_modified(
-                            matched_reg, remaining_instructions
-                        ) and not gadgets.is_register_modified(
-                            reg, remaining_instructions
-                        ):
-                            results.append(gadget)
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
+
+                    # Check if the register is modified in the remaining instructions
+                    if not gadgets.is_register_modified(
+                        matched_reg, remaining_instructions
+                    ) and not gadgets.is_register_modified(reg, remaining_instructions):
+                        results.append(gadget)
 
             # Now, handle the 'push <reg>' case
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
@@ -208,20 +207,47 @@ class Console:
                     matched_instruction = match.group(0)
                     matched_reg = match.group(1)  # Destination register from the regex
 
-                    # Ensure the matched instruction exists in the gadget's instructions
-                    if matched_instruction in gadget.instructions:
-                        matched_index = gadget.instructions.index(matched_instruction)
+                    if matched_instruction not in gadget.instructions:
+                        continue
 
-                        # Take only the instructions AFTER the matched one
-                        remaining_instructions = gadget.instructions[
-                            matched_index + 1 :
-                        ]
+                    matched_index = gadget.instructions.index(matched_instruction)
 
-                        # Check if the register is modified in the remaining instructions
-                        if not gadgets.is_register_modified(
-                            matched_reg, remaining_instructions
-                        ):
-                            results.append(gadget)
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
+
+                    # Check if the register is modified in the remaining instructions
+                    if not gadgets.is_register_modified(
+                        matched_reg, remaining_instructions
+                    ):
+                        results.append(gadget)
+
+        return results
+
+    def push_register(self, reg: str) -> list:
+        """This method finds gadgets that push a register onto the stack without any other pop following."""
+
+        results = []
+
+        print(f"[*] Finding gadgets that push {reg} onto the stack")
+
+        patterns = [rf"push ({reg})"]
+
+        for gadget in self._gadgets:
+
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+
+                    if matched_instruction not in gadget.instructions:
+                        continue
+
+                    matched_index = gadget.instructions.index(matched_instruction)
+
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
+
+                    if "pop" not in " ; ".join(remaining_instructions):
+                        results.append(gadget)
 
         return results
 
@@ -239,10 +265,10 @@ class Console:
         """Find gadgets that increment a register (e.g., inc eax)"""
         print(f"[*] Finding gadgets that increment {reg}")
         patterns = [
-            rf"add {reg}, 0x[1-9a-fA-F]+",
-            rf"sub {reg}, -0x[1-9a-fA-F]+",
+            rf"add {reg}, 0x[0-9a-fA-F]+",
+            rf"sub {reg}, -0x[0-9a-fA-F]+",
             rf"inc {reg}",
-            rf"lea {reg}, \[{reg}\+0x[1-9a-fA-F]+\]",
+            rf"lea {reg}, \[{reg}\+0x[0-9a-fA-F]+\]",
         ]
         return [g for g in self._gadgets if g.regex(patterns)]
 
@@ -250,45 +276,79 @@ class Console:
         """Find gadgets that decrement a register (e.g., dec eax)"""
         print(f"[*] Finding gadgets that decrement {reg}")
         patterns = [
-            rf"sub {reg}, 0x[1-9a-fA-F]+",
-            rf"add {reg}, -0x[1-9a-fA-F]+",
+            rf"sub {reg}, 0x[0-9a-fA-F]+",
+            rf"add {reg}, -0x[0-9a-fA-F]+",
             rf"dec {reg}",
-            rf"lea {reg}, \[{reg}\-0x[1-9a-fA-F]+\]",
+            rf"lea {reg}, \[{reg}\-0x[0-9a-fA-F]+\]",
         ]
         return [g for g in self._gadgets if g.regex(patterns)]
 
     def dereference_register(self, reg: str) -> list:
         """Find gadgets that dereference a register (e.g., mov eax, [eax])"""
-        results = []
+
         print(f"[*] Finding gadgets that deref {reg} register")
 
+        results = []
+
+        patterns = [
+            rf"(?:mov|xchg) (\w+), (?:dword )?\[{reg}\]",
+            rf"xchg (?:dword )?\[{reg}\], (\w+)",
+        ]
+
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match(
-                rf"(mov|xchg) (\w+), (?:dword )?\[{reg}\]"
-            ):
+            if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     matched_reg = match.group(1)
 
-                    if matched_instruction:
-                        matched_index = gadget.instructions.index(matched_instruction)
+                    if matched_instruction not in gadget.instructions:
+                        continue
 
-                        # Take only the instructions AFTER the matched one
-                        remaining_instructions = gadget.instructions[
-                            matched_index + 1 :
-                        ]
+                    matched_index = gadget.instructions.index(matched_instruction)
 
-                        # Check if the register is modified in the remaining instructions
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
 
-                        if not gadgets.is_register_modified(
-                            matched_reg, remaining_instructions
-                        ):
-                            results.append(gadget)
+                    if not gadgets.is_register_modified(
+                        matched_reg, remaining_instructions
+                    ):
+                        results.append(gadget)
 
             # Now, handle the 'push [<reg>]' case
             if f"push [{reg}]" in gadget.raw and gadget.verify_push_coherence(reg):
                 results.append(gadget)
 
+        return results
+
+    def swap_register(self, reg: str) -> list:
+        """Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>)"""
+
+        print(f"[*] Finding gadgets that swap {reg} with any other register")
+
+        results = []
+
+        patterns = [rf"xchg (\w+), {reg}", rf"xchg {reg}, (\w+)"]
+
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    matched_reg = match.group(1)
+
+                    if matched_instruction not in gadget.instructions:
+                        continue
+
+                    matched_index = gadget.instructions.index(matched_instruction)
+
+                    # Take only the instructions AFTER the matched one
+                    remaining_instructions = gadget.instructions[matched_index + 1 :]
+
+                    # Check if the register is modified in the remaining instructions
+
+                    if not gadgets.is_register_modified(
+                        matched_reg, remaining_instructions
+                    ):
+                        results.append(gadget)
         return results
 
     def find_jump_gadgets(self, reg: str) -> list:
@@ -311,15 +371,6 @@ class Console:
         ]
 
         return jump_gadgets
-
-    def swap_register(self, reg: str) -> list:
-        """Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>)"""
-
-        print(f"[*] Finding gadgets that swap {reg} with any other register")
-
-        # Look for `xchg` instructions
-        pattern = rf"xchg {reg}, \w+|xchg \w+, {reg}"
-        return [g for g in self._gadgets if g.regex(pattern)]
 
     def zero(self, reg: str) -> list:
         """Find gadgets that zero the given register"""
@@ -362,7 +413,9 @@ class Console:
                 results = self.execute(command)
 
                 if results:
-                    results = sorted(results, key=lambda x: len(x.raw), reverse=True)
+                    results = sorted(
+                        results, key=lambda x: len(x.instructions), reverse=True
+                    )
                     for gadget in results:
                         if pythonic_string:
                             print(gadget.pythonic_string(with_base_address))
