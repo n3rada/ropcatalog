@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ropcatalog"
-version = "1.0.0"
+version = "1.0.1"
 description = " Finding and classifying gadgets from rp++ output file with some regex, with a CLI."
 authors = ["n3rada <72791564+n3rada@users.noreply.github.com>"]
 license = "GPL-3.0-only"
