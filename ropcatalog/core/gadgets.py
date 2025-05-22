@@ -1,197 +1,176 @@
-# Built-in imports
 import re
 from pathlib import Path
 from typing import Union, List
 
 
-def is_register_modified(reg: str, instructions: list) -> bool:
-    """
-    Checks if a register or its sub-registers are modified in the given instructions.
+def sort_key(gadget: 'Gadget') -> tuple:
+    instr_count = len(gadget.instructions)
+    # Penalize retn IMM to deprioritize large stack shifts
+    if "retn 0x" in gadget.raw:
+        return (instr_count + 0.5, int(re.search(r"retn 0x([0-9a-fA-F]+)", gadget.raw).group(1), 16))
+    return (instr_count, 0)
 
-    Args:
-        reg (str): The register to check (e.g., "eax").
-        instructions (list): A list of instruction strings.
-
-    Returns:
-        bool: True if the register or any sub-registers are modified, False otherwise.
+def is_register(operand: str, arch: str = 'x86') -> bool:
     """
-    # Map each main register to its sub-registers
-    sub_registers = {
-        "eax": ["eax", "ax", "al", "ah"],
-        "ebx": ["ebx", "bx", "bl", "bh"],
-        "ecx": ["ecx", "cx", "cl", "ch"],
-        "edx": ["edx", "dx", "dl", "dh"],
-        "esp": ["esp", "sp"],
-        "ebp": ["ebp", "bp"],
-        "esi": ["esi", "si"],
-        "edi": ["edi", "di"],
+    Checks if the operand is a valid register for the given architecture.
+    Returns True if operand is a register, False otherwise (e.g., for '0x...' immediates).
+    """
+    registers_x86 = {
+        "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+        "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
+        "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh"
     }
-
-    # Get the list of relevant registers to check
-    registers_to_check = sub_registers.get(reg, [reg])
-
-    # Check if any of the main or sub-registers are modified in the instructions
-    for instr in instructions:
-        for reg_check in registers_to_check:
-            if "," in instr:
-                if reg_check in instr.split(",")[0]:
-                    return True
-            else:
-                if f"pop {reg_check}" in instr:
-                    return True
-    return False
+    registers_x64 = registers_x86 | {
+        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
+        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+        "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
+        "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
+        "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
+        "sil", "dil"
+    }
+    registers = registers_x64 if arch == 'x64' else registers_x86
+    operand = operand.lower().strip()
+    if operand.startswith("0x"):
+        return False
+    return operand in registers
 
 
 class Gadget:
-
-    # In ROP chains, the goal is to execute a sequence of gadgets that are small,
-    # predictable and controlled via the stack.
-    # Any instruction that changes the control flow, stack pointer
-    # or depends on unpredictable conditions
-    # is considered bad because it introduces instability into the exploit.
     BAD_OPS = {
-        "int3",
-        "call",
-        "leave",
-        "loop",
-        "loopne",
-        "jmp",
-        "jz",
-        "je",
-        "jnz",
-        "jne",
-        "ja",
-        "jae",
-        "jna",
-        "jnae",
-        "jb",
-        "jbe",
-        "jnb",
-        "jnbe",
+        "int3", "call", "leave", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
+        "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe"
     }
 
-    MAX_RETN = 0x28  # 10 DWORDs (10 * 4 bytes = 40 bytes)
+    MAX_RETN = 0x28  # 10 DWORDs = 40 bytes
 
     @staticmethod
     def instruction_string_to_list(instruction_string: str) -> list:
-        return [
-            instruction.strip()
-            for instruction in instruction_string.split(";")
-            if instruction.strip()
-        ]
+        return [instruction.strip() for instruction in instruction_string.split(";") if instruction.strip()]
 
-    def __init__(self, address: str, raw_string: str, module: str = None):
-
+    def __init__(self, address: str, raw_string: str, module: str = None, arch: str = 'x86'):
+        self._arch = arch.lower()
         self._address = f"0x{int(address, 16):x}"
-
-        # Normalize spaces in the raw instruction string
-        normalized_raw = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
-        self._raw = normalized_raw
-
-        self._instructions = Gadget.instruction_string_to_list(
-            instruction_string=self._raw
-        )
         self._module = module
+        self._raw = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
+        self._instructions = Gadget.instruction_string_to_list(instruction_string=self._raw)
+
+        
+    def is_register_modified(self, reg: str, instructions: list) -> bool:
+        """
+        Checks if a register or its sub-registers are modified in the given instructions.
+        Supports x86 and x64 register formats.
+
+        Args:
+            reg (str): The register to check (e.g., "eax" or "rax").
+            instructions (list): A list of instruction strings.
+
+        Returns:
+            bool: True if the register or any sub-registers are modified, False otherwise.
+        """
+        sub_registers_x86 = {
+            "eax": ["eax", "ax", "al", "ah"],
+            "ebx": ["ebx", "bx", "bl", "bh"],
+            "ecx": ["ecx", "cx", "cl", "ch"],
+            "edx": ["edx", "dx", "dl", "dh"],
+            "esp": ["esp", "sp"],
+            "ebp": ["ebp", "bp"],
+            "esi": ["esi", "si"],
+            "edi": ["edi", "di"],
+        }
+
+        sub_registers_x64 = {
+            "rax": ["rax", "eax", "ax", "al", "ah"],
+            "rbx": ["rbx", "ebx", "bx", "bl", "bh"],
+            "rcx": ["rcx", "ecx", "cx", "cl", "ch"],
+            "rdx": ["rdx", "edx", "dx", "dl", "dh"],
+            "rsp": ["rsp", "esp", "sp"],
+            "rbp": ["rbp", "ebp", "bp"],
+            "rsi": ["rsi", "esi", "si", "sil"],
+            "rdi": ["rdi", "edi", "di", "dil"],
+            "r8": ["r8", "r8d", "r8w", "r8b"],
+            "r9": ["r9", "r9d", "r9w", "r9b"],
+            "r10": ["r10", "r10d", "r10w", "r10b"],
+            "r11": ["r11", "r11d", "r11w", "r11b"],
+            "r12": ["r12", "r12d", "r12w", "r12b"],
+            "r13": ["r13", "r13d", "r13w", "r13b"],
+            "r14": ["r14", "r14d", "r14w", "r14b"],
+            "r15": ["r15", "r15d", "r15w", "r15b"],
+        }
+
+        sub_registers = sub_registers_x64 if self._arch == 'x64' else sub_registers_x86
+        registers_to_check = sub_registers.get(reg, [reg])
+
+        for instr in instructions:
+            for reg_check in registers_to_check:
+                if "," in instr:
+                    if reg_check in instr.split(",")[0]:
+                        return True
+                else:
+                    if f"pop {reg_check}" in instr:
+                        return True
+        return False
 
     def has_bad_op(self) -> bool:
-        """
-        Checks if any bad operations are present in the gadget.
-        """
         return any(bad_op in self._raw for bad_op in self.BAD_OPS)
 
     def has_big_retn(self) -> bool:
-        """
-        Checks if the gadget ends with a large `retn 0x...` value.
-        """
         if match := re.search(r"retn 0x([0-9a-fA-F]+)", self._raw):
-            retn_value = int(match.group(1), 16)
-            return retn_value > self.MAX_RETN
+            return int(match.group(1), 16) > self.MAX_RETN
         return False
 
     def has_bad_chars_in_address(self, bad_chars: list) -> bool:
-        """
-        Checks if the address of the gadget contains any bad characters.
-
-        Args:
-            bad_chars (list): A list of bad character hex strings (e.g., ['00', '0a', '0d']).
-
-        Returns:
-            bool: True if any bad character is found in the address, False otherwise.
-        """
-
-        for byte in [self._address[i : i + 2] for i in range(2, len(self._address), 2)]:
+        for byte in [self._address[i: i + 2] for i in range(2, len(self._address), 2)]:
             if byte in bad_chars:
                 return True
-
         return False
 
     def verify_push_coherence(self, target_register: str) -> bool:
-        """
-        Checks if the given assembly instruction string contains a valid sequence where `src` is pushed
-        and subsequently popped into any destination register.
-        """
-
-        # Stack to simulate push/pop operations
         pushed = []
-
         for instr in self._instructions:
-            # Split and strip the instruction into the command and register
             parts = instr.split()
             if len(parts) != 2:
-                continue  # Skip malformed instructions
-
+                continue
             cmd, reg = parts[0].strip(), parts[1].strip()
-
             if cmd == "push":
-                pushed.append(reg)  # Push the register onto the simulated stack
-            elif cmd == "pop" and pushed:
-                tmp = pushed.pop()  # Pop the last pushed register
-
-                # Check if the popped register matches the source we're interested in
-                if tmp == target_register:
-                    return True  # Found a valid match
-
+                pushed.append(reg)
+            elif cmd == "pop" and pushed and pushed.pop() == target_register:
+                return True
         return False
 
     def exact_match(self, search_term: str) -> bool:
         return Gadget.instruction_string_to_list(search_term) == self._instructions
 
     def partial_match(self, search_term: str) -> bool:
-        return all(
-            search_op in self._raw
-            for search_op in Gadget.instruction_string_to_list(search_term)
-        )
+        return all(op in self._raw for op in Gadget.instruction_string_to_list(search_term))
 
     def regex(self, patterns: Union[str, list[str]]) -> bool:
         if isinstance(patterns, str):
             patterns = [patterns]
-
-        # Iterate over the list of patterns and search for a match
-        for regex_pattern in patterns:
-            if re.search(regex_pattern, self._raw, re.IGNORECASE):
-                return True
-        return False
+        return any(re.search(p, self._raw, re.IGNORECASE) for p in patterns)
 
     def pattern_match(self, patterns: Union[str, list[str]]) -> list[re.Match]:
         if isinstance(patterns, str):
             patterns = [patterns]
-
         matches = []
-        # Iterate over the list of patterns and search for all matches
-        for regex_pattern in patterns:
-            matches.extend(re.finditer(regex_pattern, self._raw, re.IGNORECASE))
-
+        for p in patterns:
+            matches.extend(re.finditer(p, self._raw, re.IGNORECASE))
         return matches
 
     def pythonic_string(self, with_base_address: bool = False) -> str:
         header = 'rop += pack("<L", '
-
         if with_base_address:
             header += f"ba__{self._module} + "
-
         header += self._address
-
         return header + f") # {self._raw} [{self._module}]"
+    
+    def javascript_string(self, with_base_address: bool = False) -> str:
+        """
+        Returns a JavaScript-style gadget representation:
+        writePtr(ropBuffer + ropIndex * 8, <base> + <offset>); ropIndex++; // <gadget> [<module>]
+        """
+        base_expr = f"g{self._module}Base + " if with_base_address else ""
+        return f"writePtr(ropBuffer + ropIndex * 8, {base_expr}{self._address}); ropIndex++; // {self._raw} [{self._module}]"
+
 
     def __str__(self):
         return f"{self._address} # {self._raw} [{self._module}]"
@@ -199,10 +178,14 @@ class Gadget:
     def __repr__(self):
         return f"Gadget({self._address}, {self._raw}, {self._instructions})"
 
-    # Properties
+    @property
+    def module(self) -> str:
+        return self._module
+
     @property
     def raw(self) -> str:
         return self._raw
+
 
     @property
     def address(self) -> str:
@@ -212,21 +195,28 @@ class Gadget:
     def instructions(self) -> list:
         return self._instructions
 
+    @property
+    def arch(self) -> str:
+        return self._arch
+
 
 class Gadgets:
-
-    def __init__(self, file_paths: List[str], bad_chars: list = None):
+    def __init__(self, file_paths: List[str], bad_chars: list = None, arch: str = 'x86'):
         self._gadgets = []
 
         self._bad_characters = bad_chars
+        self._arch = arch.lower()
+        self._unique_mode = False
 
         for file_path in file_paths:
             path = Path(file_path).resolve()
             if not path.is_file():
                 print(f"[!] File {file_path} does not exist.")
                 continue
-
             self._gadgets.extend(self._parse_file(path))
+
+        # preserve full list
+        self._full_list = list(self._gadgets)  
 
         print(f"[+] Total of {len(self)} gadgets loaded")
 
@@ -237,72 +227,56 @@ class Gadgets:
         return len(self._gadgets)
 
     def add_gadget(self, gadget: Gadget) -> None:
-        """
-        Adds a Gadget object to the collection.
-        """
         if isinstance(gadget, Gadget):
             self._gadgets.append(gadget)
         else:
             raise TypeError("Only Gadget objects can be added.")
 
-    def filter_unique(self) -> None:
-        """
-        Filters the gadget list to only retain unique gadgets based on the raw instruction sequence.
-        """
-        unique_gadgets = {}
-        for gadget in self._gadgets:
-            if gadget.raw not in unique_gadgets:
-                unique_gadgets[gadget.raw] = gadget
+    def set_uniqueness(self, enabled: bool):
+        self._unique_mode = enabled
+        if enabled:
+            self._gadgets = self._filter_unique(self._full_list)
+        else:
+            self._gadgets = list(self._full_list)
+        print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._gadgets)} gadgets)")
 
-        self._gadgets = list(unique_gadgets.values())
-        print(
-            f"[+] Filtered to {len(self._gadgets)} unique gadgets based on instructions."
-        )
+    def _filter_unique(self, gadgets_list):
+        seen = {}
+        for g in gadgets_list:
+            if g.raw not in seen:
+                seen[g.raw] = g
+        return list(seen.values())
 
     def _parse_file(self, file_path: str) -> list:
         print(f"[*] Parsing {file_path.name}, looking for usable gadgets")
-        # Regex pattern to match the address and the list of operations
-        gadget_pattern = re.compile(
-            r"^(0x[0-9a-fA-F]+):\s*(.+?)\s*(?:\(\d+\sfound\))?$", re.MULTILINE
-        )
+        gadget_pattern = re.compile(r"^(0x[0-9a-fA-F]+):\s*(.+?)\s*(?:\(\d+\sfound\))?$", re.MULTILINE)
 
         with open(file_path, mode="r", encoding="utf-8") as file_obj:
             file_content = file_obj.read()
 
         bad_char_count = 0
-
         results = []
 
-        # Iterate over all matches in the file content and yield each gadget
         for match in gadget_pattern.finditer(file_content):
             gadget = Gadget(
                 address=match.group(1),
                 raw_string=match.group(2).strip().lower(),
                 module=file_path.stem,
+                arch=self._arch,
             )
-
-            # If any bad character is present in the address
-            if self._bad_characters is not None and gadget.has_bad_chars_in_address(
-                self._bad_characters
-            ):
+            if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
                 bad_char_count += 1
                 continue
-
             results.append(gadget)
 
         print(f"\n[{file_path.stem}] Parsing completed:")
         print(f"[+] Total gadgets extracted: {len(results)}")
         print(f"[+] {bad_char_count} gadgets contained bad characters")
-
         return results
 
     def to_dict(self) -> dict:
-        """
-        Transforms the collection of Gadget objects to a dictionary {address: raw}.
-        """
-        return {gadget.address: gadget.raw for gadget in self._gadgets}
+        return {g.address: g.raw for g in self._gadgets}
 
-    # Properties
     @property
     def gadgets(self) -> list:
         return self._gadgets
