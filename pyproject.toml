@@ -1,18 +1,24 @@
-[tool.poetry]
+[project]
 name = "ropcatalog"
-version = "1.0.1"
-description = " Finding and classifying ROP gadgets from rp++ output file with some regex, with a CLI."
-authors = ["n3rada <72791564+n3rada@users.noreply.github.com>"]
+version = "1.0.0"
+description = " Finding and classifying ROP gadgets from rp++ output file with some regex and a CLI."
+authors = [
+    {name = "n3rada"}
+]
 license = "GPL-3.0-only"
 readme = "README.md"
+requires-python = ">=3.9,<4.0"
+dependencies = [
+    "prompt-toolkit (>=3.0.48, <4.0.0)",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.9"
-prompt-toolkit = "^3.0.48"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[project.urls]
+repository = "https://github.com/n3rada/ropcatalog"
 
 [tool.poetry.scripts]
 ropcatalog = "ropcatalog.console:run"
+
+[build-system]
+requires = ["poetry-core>=2.1.1,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
