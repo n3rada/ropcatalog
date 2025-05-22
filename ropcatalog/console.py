@@ -10,10 +10,12 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.history import ThreadedHistory, InMemoryHistory
 from prompt_toolkit.cursor_shapes import CursorShape
+from prompt_toolkit.completion import WordCompleter
 
 # Local library imports
 from ropcatalog.core import gadgets
 from ropcatalog.core import utils
+from ropcatalog.core import formatters
 
 
 class Console:
@@ -21,20 +23,25 @@ class Console:
     Manages console commands and dispatches them.
     """
 
-    def __init__(self, catalog: gadgets.Gadgets):
-        self._gadgets = catalog
+    def __init__(self, full_catalog: gadgets.Gadgets):
+        self._gadgets = full_catalog
+
         self._commands = {
             "exit": self.exit_command,
             "clear": self.clear_command,
             "list": self.list_gadgets,
+            "uniq": self.toggle_uniqueness,
             "help": self.show_help,
             "?": self.exact_search,
             "/": self.partial_search,
             "copy": self.copy_register,
+            "copyto": self.copy_to_register,
             "save": self.save_register,
+            "saveto": self.save_to_register,
             "inc": self.increment_register,
             "dec": self.decrement_register,
             "deref": self.dereference_register,
+            "memoff": self.memory_offset_search,
             ".": self.regex_search,
             "swap": self.swap_register,
             "zero": self.zero,
@@ -43,6 +50,21 @@ class Console:
             "push": self.push_register,
             "pop": self.pop_to_register,
         }
+    
+    def toggle_uniqueness(self, mode: str = None):
+        """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
+        if not mode:
+            print(f"[i] Current uniqueness mode: {'on' if self._gadgets._unique_mode else 'off'}")
+            return
+
+        if mode.lower() == "on":
+            self._gadgets.set_uniqueness(True)
+        elif mode.lower() == "off":
+            self._gadgets.set_uniqueness(False)
+        else:
+            print("[!] Usage: uniq on | uniq off")
+
+
 
     def execute(self, command_input: str) -> list:
         """
@@ -136,7 +158,7 @@ class Console:
                     remaining_instructions = gadget.instructions[matched_index + 1 :]
 
                     # Check if the register is modified in the remaining instructions
-                    if not gadgets.is_register_modified(
+                    if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
                     ):
                         results.append(gadget)
@@ -146,6 +168,43 @@ class Console:
                 results.append(gadget)
 
         return results
+    
+    def copy_to_register(self, reg: str) -> list:
+        """Find gadgets that copy into the given register (e.g., r9)"""
+
+        results = []
+
+        print(f"[*] Finding gadgets that copy into {reg}")
+
+        patterns = [
+            rf"mov {reg}, (\w+)",
+            rf"lea {reg}, \[(\w+).+?\]",
+        ]
+
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+
+                    if matched_instruction not in gadget.instructions:
+                        continue
+
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+
+                    # Ensure the destination is not clobbered afterward
+                    if not gadget.is_register_modified(reg, remaining_instructions):
+                        results.append(gadget)
+
+            # Support stack transfer too
+            if f"pop {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
+                matched_index = gadget.instructions.index(f"pop {reg}")
+                remaining_instructions = gadget.instructions[matched_index + 1:]
+                if not gadget.is_register_modified(reg, remaining_instructions):
+                    results.append(gadget)
+
+        return results
+
 
     def save_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register without modifying either register afterward."""
@@ -166,7 +225,12 @@ class Console:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
+
                     matched_reg = match.group(1)
+
+                    # Ensure the matched_reg is a register
+                    if not gadgets.is_register(matched_reg, arch=gadget.arch):
+                        continue
 
                     if matched_instruction not in gadget.instructions:
                         continue
@@ -177,19 +241,56 @@ class Console:
                     remaining_instructions = gadget.instructions[matched_index + 1 :]
 
                     # Check if the register is modified in the remaining instructions
-                    if not gadgets.is_register_modified(
+                    if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
-                    ) and not gadgets.is_register_modified(reg, remaining_instructions):
+                    ) and not gadget.is_register_modified(reg, remaining_instructions):
                         results.append(gadget)
 
             # Now, handle the 'push <reg>' case
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
                 matched_index = gadget.instructions.index(f"push {reg}")
                 remaining_instructions = gadget.instructions[matched_index + 1 :]
-                if not gadgets.is_register_modified(reg, remaining_instructions):
+                if not gadget.is_register_modified(reg, remaining_instructions):
                     results.append(gadget)
 
         return results
+    
+    def save_to_register(self, reg: str) -> list:
+        """Find gadgets that save into the given register without modifying either register afterward."""
+
+        results = []
+
+        print(f"[*] Finding gadgets that save into {reg} without later modification")
+
+        patterns = [
+            rf"mov {reg}, (\w+)",
+            rf"lea {reg}, \[(\w+).+?\]",
+        ]
+
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    source_reg = match.group(1)
+
+                    if matched_instruction not in gadget.instructions:
+                        continue
+
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+
+                    if not gadget.is_register_modified(reg, remaining_instructions) and \
+                    not gadget.is_register_modified(source_reg, remaining_instructions):
+                        results.append(gadget)
+
+            if f"pop {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
+                matched_index = gadget.instructions.index(f"pop {reg}")
+                remaining_instructions = gadget.instructions[matched_index + 1:]
+                if not gadget.is_register_modified(reg, remaining_instructions):
+                    results.append(gadget)
+
+        return results
+
 
     def pop_to_register(self, reg: str) -> list:
         """This method finds gadgets that load a value from the stack into a specified register, typically through the pop instruction."""
@@ -216,7 +317,7 @@ class Console:
                     remaining_instructions = gadget.instructions[matched_index + 1 :]
 
                     # Check if the register is modified in the remaining instructions
-                    if not gadgets.is_register_modified(
+                    if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
                     ):
                         results.append(gadget)
@@ -309,7 +410,7 @@ class Console:
                     # Take only the instructions AFTER the matched one
                     remaining_instructions = gadget.instructions[matched_index + 1 :]
 
-                    if not gadgets.is_register_modified(
+                    if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
                     ):
                         results.append(gadget)
@@ -345,7 +446,7 @@ class Console:
 
                     # Check if the register is modified in the remaining instructions
 
-                    if not gadgets.is_register_modified(
+                    if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
                     ):
                         results.append(gadget)
@@ -386,16 +487,55 @@ class Console:
         ]
 
         return [g for g in self._gadgets if g.regex(patterns)]
+    
+    def memory_offset_search(self, arg: str):
+        """Search for dereferences with register+offset (e.g., memoff rbx+0x20, or just memoff rbx to match any offset)"""
+
+        if not arg:
+            print("[!] Usage: memoff <reg> [+/- offset (optional)]")
+            return []
+
+        reg = arg.strip()
+        pattern = None
+
+        if '+' in reg or '-' in reg:
+            sep = '+' if '+' in reg else '-'
+            try:
+                base_reg, offset = reg.split(sep, maxsplit=1)
+                base_reg = base_reg.strip()
+                offset = offset.strip()
+                pattern = rf"mov.*\[\s*{base_reg}\s*{re.escape(sep)}\s*{offset}\s*\],.*"
+            except ValueError:
+                print("[!] Failed to parse register and offset. Use format: reg+offset or reg-offset")
+                return []
+        else:
+            # Match any offset off that register: [reg + ...] or [reg - ...]
+            pattern = rf"mov.*\[\s*{reg}\s*[\+\-]\s*.*\],.*"
+
+        return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
+
 
     def regex_search(self, pattern: str) -> str:
         """Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)"""
         print(f"[*] Searching with regex '{pattern}'")
 
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
+    
+    def toggle_uniqueness(self, mode: str = None):
+        """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
+        if not mode:
+            print(f"[i] Current uniqueness mode: {'on' if self._gadgets._unique_mode else 'off'}")
+            return
 
-    def start(
-        self, pythonic_string: bool = False, with_base_address: bool = False
-    ) -> None:
+        if mode.lower() == "on":
+            self._gadgets.set_uniqueness(True)
+        elif mode.lower() == "off":
+            self._gadgets.set_uniqueness(False)
+        else:
+            print("[!] Usage: uniq on | uniq off")
+
+
+    def start(self, formatter: formatters.GadgetFormatter, with_base_address: bool=False) -> None:
         session = PromptSession(
             cursor=CursorShape.BLINKING_BEAM,
             multiline=False,
@@ -404,7 +544,11 @@ class Console:
             auto_suggest=AutoSuggestFromHistory(),
             history=ThreadedHistory(InMemoryHistory()),
             complete_while_typing=True,
+            completer=WordCompleter(list(self._commands.keys()), ignore_case=True),
         )
+
+
+
         print()
         while True:
             try:
@@ -413,14 +557,9 @@ class Console:
                 results = self.execute(command)
 
                 if results:
-                    results = sorted(
-                        results, key=lambda x: len(x.instructions), reverse=True
-                    )
+                    results = sorted(results, key=gadgets.sort_key, reverse=True)
                     for gadget in results:
-                        if pythonic_string:
-                            print(gadget.pythonic_string(with_base_address))
-                        else:
-                            print(gadget)
+                        print(formatter.format(gadget, with_base_address))
 
                     print(f"---- {len(results)} gadget(s)")
             except KeyboardInterrupt:
@@ -457,11 +596,13 @@ def run() -> None:
     )
 
     parser.add_argument(
-        "-p",
-        "--python",
-        action="store_true",
-        help="Display in a convenient way for python3 copy/paste.",
+        "-s",
+        "--style",
+        choices=["plain", "python", "js"],
+        default="plain",
+        help="Output format style: plain, python, or js.",
     )
+
 
     parser.add_argument(
         "-o",
@@ -487,11 +628,19 @@ def run() -> None:
             # Add all files in the directory
             file_paths.extend([file for file in path.iterdir() if file.is_file()])
         elif path.is_file():
-            file_paths.append(path)
+            if path.exists():
+                file_paths.append(path)
+            else:
+                print(f"[!] Path '{path}' does not exist.")
+                return
         else:
             print(f"[!] Path '{path}' is not a valid file or directory.")
 
-    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars)
+    arch = utils.detect_arch_from_file(file_paths[0])
+    print(f"[+] Detected architecture: {arch}")
+
+    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, arch=arch)
+
 
     if len(catalog) == 0:
         print("[!] No gadgets available, try another module")
@@ -499,8 +648,16 @@ def run() -> None:
 
     # Filter for unique gadgets if -u flag is set
     if args.unique:
-        catalog.filter_unique()
+        catalog.set_uniqueness(True)
 
     console = Console(catalog)
 
-    console.start(pythonic_string=args.python, with_base_address=args.offset)
+    style_map = {
+        "plain": formatters.PlainFormatter,
+        "python": formatters.PythonFormatter,
+        "js": formatters.JavaScriptFormatter,
+    }
+
+    formatter = style_map[args.style]()
+
+    console.start(formatter=formatter, with_base_address=args.offset)
