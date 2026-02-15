@@ -52,6 +52,7 @@ class Console:
             "jump": self.find_jump_gadgets,
             "push": self.push_register,
             "pop": self.pop_to_register,
+            "pivot": self.stack_pivot,
         }
     
     def toggle_uniqueness(self, mode: str = None):
