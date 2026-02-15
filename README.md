@@ -35,10 +35,12 @@ Now, you can search for any gadget that copies the stack pointer (`ESP`) registe
 
 
 Without offset considerations, you can search inside any module for gadgets that dereference `ESI`:
+
 ![deref_esi](./images/deref_esi.png)
 
 
 Without using the Python copy-paste format, you can search for gadgets that zero `EAX`:
+
 ![zero_eax](./images/zero_eax.png)
 
 ## Command Reference
