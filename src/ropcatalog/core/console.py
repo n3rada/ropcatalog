@@ -15,9 +15,9 @@ from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.completion import WordCompleter
 
 # Local library imports
+from . import gadgets
 
 if TYPE_CHECKING:
-    from .gadgets import Gadgets
     from .formatters import GadgetFormatter
 
 
@@ -26,7 +26,7 @@ class Console:
     Manages console commands and dispatches them.
     """
 
-    def __init__(self, full_catalog: "Gadgets"):
+    def __init__(self, full_catalog: "gadgets.Gadgets"):
         self._gadgets = full_catalog
 
         self._commands = {
