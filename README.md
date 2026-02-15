@@ -1,5 +1,5 @@
 
-`ropcatalog` is a Python tool designed for parsing and analyzing ROP (Return-Oriented Programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It helps identify, classify, and filter useful ROP gadgets.
+`ropcatalog` is a Python tool designed for parsing and analyzing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It helps identify, classify, and filter useful ROP gadgets.
 
 It was built during OffSec journey. Primarly for [EXP-301 course](https://www.offsec.com/courses/exp-301/) and then [EXP-401](https://www.offsec.com/courses/exp-401/). These courses focuses on Windows exploit development.
 
