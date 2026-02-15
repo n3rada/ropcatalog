@@ -93,17 +93,20 @@ class Terminal:
 
         results = self._commands[cmd](args) or []
 
-        if filtering:
+        # Check if exit command was called
+        if cmd == "exit" and results is True:
+            raise SystemExit(0)
+
+        if filtering and isinstance(results, list):
             results = [gadget for gadget in results if not gadget.has_bad_op()]
 
-        return results
+        return results if isinstance(results, list) else []
 
     # Command methods
 
-    def exit_command(self, fake_arg=None):
+    def exit_command(self, fake_arg=None) -> bool:
         """Exit"""
-        print("[+] Exiting.")
-        sys.exit(1)
+        return True
 
     def clear_command(self, fake_arg=None):
         """Clear the terminal"""
@@ -633,7 +636,7 @@ class Terminal:
             print("[!] Usage: uniq on | uniq off")
 
 
-    def start(self, formatter: "GadgetFormatter", with_base_address: bool=False) -> None:
+    def start(self, formatter: "GadgetFormatter", with_base_address: bool=False) -> int:
         session = PromptSession(
             cursor=CursorShape.BLINKING_BEAM,
             multiline=False,
@@ -645,7 +648,8 @@ class Terminal:
             completer=WordCompleter(list(self._commands.keys()), ignore_case=True),
         )
 
-        print()
+        ctrl_c_count = 0
+
         while True:
             try:
                 command = session.prompt("[ropcatalog]# ").strip() or "help"
@@ -659,6 +663,19 @@ class Terminal:
 
                     print(f"---- {len(results)} gadget(s)")
             except KeyboardInterrupt:
-                print("[i] Keyboard interruption received. Not exiting.")
+                # Control-C pressed - check if buffer has text first
+                if session.app.current_buffer.text:
+                    continue
+
+                ctrl_c_count += 1
+                if ctrl_c_count >= 2:
+                    print("\n[+] Exiting on double Ctrl+C.")
+                    return 130
+                else:
+                    print("\n[i] Press Ctrl+C again to exit, or type 'exit'.")
+                    continue
+            except SystemExit:
+                # Exit command was called
+                return 0
             except re.error:
                 print("[!] Wrongly typed command")
