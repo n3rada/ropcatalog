@@ -11,7 +11,7 @@ Designed for simplicity, using `pipx` for isolation:
 pipx install 'git+https://github.com/n3rada/ropcatalog.git'
 ```
 
-Or `uv`:
+Or with `uv`:
 ```
 uv tool install 'git+https://github.com/n3rada/ropcatalog.git'
 ```
