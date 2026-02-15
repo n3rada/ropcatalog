@@ -271,9 +271,9 @@ class Gadgets:
                 continue
             results.append(gadget)
 
-        print(f"\n[{file_path.stem}] Parsing completed:")
-        print(f"[+] Total gadgets extracted: {len(results)}")
-        print(f"[+] {bad_char_count} gadgets contained bad characters")
+        print(f"\n[{file_path.stem}] Parsing completed")
+        print(f"|-> Total gadgets extracted: {len(results)}")
+        print(f"|-> Gadgets containing bad characters: {bad_char_count}")
         return results
 
     def to_dict(self) -> dict:
