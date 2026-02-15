@@ -11,6 +11,11 @@ Designed for simplicity, using `pipx` for isolation:
 pipx install 'git+https://github.com/n3rada/ropcatalog.git'
 ```
 
+Or `uv`:
+```
+uv tool install 'git+https://github.com/n3rada/ropcatalog.git'
+```
+
 Then, you can use `ropcatalog` to help you leaf through the gadget catalog:
 ```shell
 ropcatalog ~/dump/libeay32IBM019.txt
