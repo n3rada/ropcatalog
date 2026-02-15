@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="",
         required=False,
-        help="A string of characters to exclude in the format '\\x00\\x0a\\x0d'.",
+        help=r"A string of characters to exclude in the format '\x00\x0a\x0d'.",
     )
 
     parser.add_argument(
@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-s",
         "--style",
-        choices=["plain", "python", "js"],
+        choices=["plain", "python", "js", "cpp"],
         default="plain",
         help="Output format style: plain, python, or js.",
     )
@@ -102,6 +102,7 @@ def main() -> int:
     style_map = {
         "plain": formatters.PlainFormatter,
         "python": formatters.PythonFormatter,
+        "cpp": formatters.CppFormatter,
         "js": formatters.JavaScriptFormatter,
     }
 
