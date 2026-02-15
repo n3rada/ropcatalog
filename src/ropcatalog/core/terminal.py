@@ -669,10 +669,10 @@ class Terminal:
 
                 ctrl_c_count += 1
                 if ctrl_c_count >= 2:
-                    print("\n[+] Exiting on double Ctrl+C.")
+                    print("[+] Exiting on double Ctrl+C.")
                     return 130
                 else:
-                    print("\n[i] Press Ctrl+C again to exit, or type 'exit'.")
+                    print("[i] Press Ctrl+C again to exit, or type 'exit'.")
                     continue
             except SystemExit:
                 # Exit command was called
