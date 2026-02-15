@@ -29,34 +29,34 @@ class Terminal:
     def __init__(self, full_catalog: "gadgets.Gadgets"):
         self._gadgets = full_catalog
 
-    self._commands = {
-        "exit": self.exit_command,
-        "clear": self.clear_command,
-        "list": self.list_gadgets,
-        "uniq": self.toggle_uniqueness,
-        "help": self.show_help,
-        "?": self.exact_search,
-        "/": self.partial_search,
-        "copy": self.copy_register,
-        "copyto": self.copy_to_register,
-        "save": self.save_register,
-        "saveto": self.save_to_register,
-        "inc": self.increment_register,
-        "dec": self.decrement_register,
-        "read": self.dereference_register,  # Alias for deref
-        "deref": self.dereference_register,
-        "write": self.write_primitive,
-        "memoff": self.memory_offset_search,
-        ".": self.regex_search,
-        "swap": self.swap_register,
-        "zero": self.zero,
-        "ppr": self.find_ppr,
-        "jump": self.find_jump_gadgets,
-        "call": self.indirect_call,
-        "push": self.push_register,
-        "pop": self.pop_to_register,
-        "pivot": self.stack_pivot,
-    }
+        self._commands = {
+            "exit": self.exit_command,
+            "clear": self.clear_command,
+            "list": self.list_gadgets,
+            "uniq": self.toggle_uniqueness,
+            "help": self.show_help,
+            "?": self.exact_search,
+            "/": self.partial_search,
+            "copy": self.copy_register,
+            "copyto": self.copy_to_register,
+            "save": self.save_register,
+            "saveto": self.save_to_register,
+            "inc": self.increment_register,
+            "dec": self.decrement_register,
+            "read": self.dereference_register,  # Alias for deref
+            "deref": self.dereference_register,
+            "write": self.write_primitive,
+            "memoff": self.memory_offset_search,
+            ".": self.regex_search,
+            "swap": self.swap_register,
+            "zero": self.zero,
+            "ppr": self.find_ppr,
+            "jump": self.find_jump_gadgets,
+            "call": self.indirect_call,
+            "push": self.push_register,
+            "pop": self.pop_to_register,
+            "pivot": self.stack_pivot,
+        }
     
     def toggle_uniqueness(self, mode: str = None):
         """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
