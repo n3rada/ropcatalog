@@ -191,7 +191,6 @@ class Terminal:
         
         for gadget in self._gadgets:
             arch = gadget.arch if hasattr(gadget, 'arch') else 'x86'
-            stack_reg = "rsp" if arch == 'x64' else "esp"
             
             instructions = gadget.raw.split(" ; ")
             
@@ -202,41 +201,48 @@ class Terminal:
             
             # Register-based pivots
             if mode in ["all", "reg"]:
-                reg_patterns = [
-                    rf"mov {stack_reg}, (\w+)",
-                    rf"xchg {stack_reg}, (\w+)",
-                ]
+                # On x64, check both RSP and ESP (32-bit mov zeros upper bits)
+                stack_regs = ["rsp", "esp"] if arch == 'x64' else ["esp"]
                 
-                for i, instr in enumerate(instructions[:-1]):  # Exclude 'ret' from iteration
-                    for pattern in reg_patterns:
-                        if match := re.search(pattern, instr.strip(), re.IGNORECASE):
-                            source_reg = match.group(1)
-                            
-                            if gadgets.is_register(source_reg, arch=arch):
-                                # Check instructions between pivot and ret (exclude both)
-                                remaining = instructions[i+1:-1]
+                for stack_reg in stack_regs:
+                    reg_patterns = [
+                        rf"mov {stack_reg}, (\w+)",
+                        rf"xchg {stack_reg}, (\w+)",
+                    ]
+                    
+                    for i, instr in enumerate(instructions[:-1]):
+                        for pattern in reg_patterns:
+                            if match := re.search(pattern, instr.strip(), re.IGNORECASE):
+                                source_reg = match.group(1)
                                 
-                                # Reject if ESP/RSP gets overwritten
-                                clobbered = any(
-                                    re.search(rf"\bmov {stack_reg},", instr, re.IGNORECASE) or
-                                    re.search(rf"\bxchg {stack_reg},", instr, re.IGNORECASE) or
-                                    re.search(rf"\blea {stack_reg},", instr, re.IGNORECASE)
-                                    for instr in remaining
-                                )
-                                
-                                if not clobbered:
-                                    results.append(gadget)
-                                    break
+                                if gadgets.is_register(source_reg, arch=arch):
+                                    remaining = instructions[i+1:-1]
+                                    
+                                    # Check if any stack register gets clobbered
+                                    clobbered = any(
+                                        re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
+                                        re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
+                                        re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
+                                        for instr in remaining
+                                    )
+                                    
+                                    if not clobbered:
+                                        results.append(gadget)
+                                        break
             
             # Immediate value pivots
             if mode in ["all", "imm"]:
-                imm_patterns = [
-                    rf"mov {stack_reg}, (0x[0-9a-fA-F]+)",
-                    rf"mov esp, (0x[0-9a-fA-F]+)" if arch == 'x64' else None,
-                ]
-                imm_patterns = [p for p in imm_patterns if p]
+                # On x64, check both RSP and ESP
+                imm_patterns = []
+                if arch == 'x64':
+                    imm_patterns = [
+                        rf"mov rsp, (0x[0-9a-fA-F]+)",
+                        rf"mov esp, (0x[0-9a-fA-F]+)",  # 32-bit mov zeros upper 32 bits
+                    ]
+                else:
+                    imm_patterns = [rf"mov esp, (0x[0-9a-fA-F]+)"]
                 
-                for i, instr in enumerate(instructions[:-1]):  # Exclude 'ret' from iteration
+                for i, instr in enumerate(instructions[:-1]):
                     for pattern in imm_patterns:
                         if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                             imm_str = match.group(1)
@@ -246,21 +252,20 @@ class Terminal:
                             is_reasonable = False
                             
                             if arch == 'x64':
-                                # On x64, all 32-bit values are valid (zero-extend to user-mode)
+                                # All 32-bit values are valid (zero-extend to user-mode)
                                 is_reasonable = (imm_value <= 0xFFFFFFFF)
                             else:
-                                # On x86, exclude NULL page but keep rest
+                                # On x86, exclude NULL page
                                 is_reasonable = (imm_value >= 0x00010000)
                             
                             if is_reasonable:
-                                # Check instructions between pivot and ret
                                 remaining = instructions[i+1:-1]
                                 
-                                # Reject if stack pointer gets overwritten
+                                # Check if any stack register gets clobbered
                                 clobbered = any(
-                                    re.search(rf"\bmov {stack_reg},", instr, re.IGNORECASE) or
-                                    re.search(rf"\bxchg {stack_reg},", instr, re.IGNORECASE) or
-                                    re.search(rf"\blea {stack_reg},", instr, re.IGNORECASE)
+                                    re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
+                                    re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
+                                    re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
                                     for instr in remaining
                                 )
                                 
