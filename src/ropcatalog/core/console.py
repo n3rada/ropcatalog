@@ -6,9 +6,19 @@ from typing import TYPE_CHECKING
 import os
 import sys
 
+# Third party library imports
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.history import ThreadedHistory, InMemoryHistory
+from prompt_toolkit.cursor_shapes import CursorShape
+from prompt_toolkit.completion import WordCompleter
+
+# Local library imports
+
 if TYPE_CHECKING:
     from .gadgets import Gadgets
     from .formatters import GadgetFormatter
+
 
 class Console:
     """

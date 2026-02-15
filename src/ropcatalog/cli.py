@@ -5,13 +5,6 @@ import re
 import argparse
 from pathlib import Path
 
-# Third party library imports
-from prompt_toolkit import PromptSession
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.history import ThreadedHistory, InMemoryHistory
-from prompt_toolkit.cursor_shapes import CursorShape
-from prompt_toolkit.completion import WordCompleter
-
 # Local library imports
 from .core import gadgets
 from .core import utils
