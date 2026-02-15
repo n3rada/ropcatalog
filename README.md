@@ -51,7 +51,7 @@ Without using the Python copy-paste format, you can search for gadgets that zero
 ## Command Reference
 
 ```txt
-usage: catalog [-h] [-b BAD_CHARACTERS] [-u] [-s {plain,python,js}] [-o] paths [paths ...]
+usage: catalog [-h] [-b BAD_CHARACTERS] [-u] [-s {plain,python,js,cpp}] [-o] paths [paths ...]
 
 r++ gadget parser for specific instructions.
 
@@ -63,7 +63,7 @@ options:
   -b BAD_CHARACTERS, --bad-characters BAD_CHARACTERS
                         A string of characters to exclude in the format '\x00\x0a\x0d'.
   -u, --unique          Filter for unique gadgets by their raw instruction sequences.
-  -s {plain,python,js}, --style {plain,python,js}
+  -s {plain,python,js,cpp}, --style {plain,python,js,cpp}
                         Output format style: plain, python, or js.
   -o, --offset          The file contains only the offset (e.g., ALSR case).
 ```
