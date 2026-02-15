@@ -152,10 +152,6 @@ class Terminal:
             },
         }
         
-        print("\n" + "="*70)
-        print("  ROPCATALOG - Available Commands")
-        print("="*70)
-        
         for category, commands in categories.items():
             print(f"\n{category}:")
             print("-" * 70)
