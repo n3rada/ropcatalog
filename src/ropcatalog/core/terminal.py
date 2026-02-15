@@ -192,7 +192,7 @@ class Terminal:
             
             instructions = gadget.raw.split(" ; ")
             
-            # Only reject gadgets that DON'T end in ret/retn at all
+            # Only accept gadgets ending in ret/retn/iretq
             last_instr = instructions[-1].strip().lower()
             if not (last_instr == 'ret' or last_instr.startswith('retn') or last_instr == 'iretq'):
                 continue
@@ -204,25 +204,26 @@ class Terminal:
                     rf"xchg {stack_reg}, (\w+)",
                 ]
                 
-                for i, instr in enumerate(instructions):
+                for i, instr in enumerate(instructions[:-1]):  # Exclude 'ret' from iteration
                     for pattern in reg_patterns:
                         if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                             source_reg = match.group(1)
                             
                             if gadgets.is_register(source_reg, arch=arch):
-                                if i <= len(instructions) // 2:
-                                    remaining = instructions[i+1:]
-                                    
-                                    clobbered = any(
-                                        re.search(rf"mov {stack_reg},", instr, re.IGNORECASE) or
-                                        re.search(rf"xchg {stack_reg},", instr, re.IGNORECASE) or
-                                        re.search(rf"lea {stack_reg},", instr, re.IGNORECASE)
-                                        for instr in remaining
-                                    )
-                                    
-                                    if not clobbered:
-                                        results.append(gadget)
-                                        break
+                                # Check instructions between pivot and ret (exclude both)
+                                remaining = instructions[i+1:-1]
+                                
+                                # Reject if ESP/RSP gets overwritten
+                                clobbered = any(
+                                    re.search(rf"\bmov {stack_reg},", instr, re.IGNORECASE) or
+                                    re.search(rf"\bxchg {stack_reg},", instr, re.IGNORECASE) or
+                                    re.search(rf"\blea {stack_reg},", instr, re.IGNORECASE)
+                                    for instr in remaining
+                                )
+                                
+                                if not clobbered:
+                                    results.append(gadget)
+                                    break
             
             # Immediate value pivots
             if mode in ["all", "imm"]:
@@ -232,7 +233,7 @@ class Terminal:
                 ]
                 imm_patterns = [p for p in imm_patterns if p]
                 
-                for i, instr in enumerate(instructions):
+                for i, instr in enumerate(instructions[:-1]):  # Exclude 'ret' from iteration
                     for pattern in imm_patterns:
                         if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                             imm_str = match.group(1)
@@ -242,31 +243,27 @@ class Terminal:
                             is_reasonable = False
                             
                             if arch == 'x64':
-                                # On x64, MOV ESP, imm32 zero-extends to user-mode address
-                                # All 32-bit values are potentially useful (0x00000000XXXXXXXX)
+                                # On x64, all 32-bit values are valid (zero-extend to user-mode)
                                 is_reasonable = (imm_value <= 0xFFFFFFFF)
                             else:
-                                # On x86, filter out obviously bad addresses
-                                # NULL page and very high kernel addresses less useful
-                                is_reasonable = (
-                                    (0x00010000 <= imm_value <= 0x7FFFFFFF) or  # Standard user-mode
-                                    (0x80000000 <= imm_value <= 0xFFFFFFFF)     # Kernel or extended user
-                                )
+                                # On x86, exclude NULL page but keep rest
+                                is_reasonable = (imm_value >= 0x00010000)
                             
                             if is_reasonable:
-                                if i <= len(instructions) // 2:
-                                    remaining = instructions[i+1:]
-                                    
-                                    clobbered = any(
-                                        re.search(rf"mov {stack_reg},", instr, re.IGNORECASE) or
-                                        re.search(rf"xchg {stack_reg},", instr, re.IGNORECASE) or
-                                        re.search(rf"lea {stack_reg},", instr, re.IGNORECASE)
-                                        for instr in remaining
-                                    )
-                                    
-                                    if not clobbered:
-                                        results.append(gadget)
-                                        break
+                                # Check instructions between pivot and ret
+                                remaining = instructions[i+1:-1]
+                                
+                                # Reject if stack pointer gets overwritten
+                                clobbered = any(
+                                    re.search(rf"\bmov {stack_reg},", instr, re.IGNORECASE) or
+                                    re.search(rf"\bxchg {stack_reg},", instr, re.IGNORECASE) or
+                                    re.search(rf"\blea {stack_reg},", instr, re.IGNORECASE)
+                                    for instr in remaining
+                                )
+                                
+                                if not clobbered:
+                                    results.append(gadget)
+                                    break
         
         return results
             
