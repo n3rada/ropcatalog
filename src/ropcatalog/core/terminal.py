@@ -16,9 +16,7 @@ from prompt_toolkit.completion import WordCompleter
 
 # Local library imports
 from . import gadgets
-
-if TYPE_CHECKING:
-    from .formatters import GadgetFormatter
+from . import formatters
 
 
 class Terminal:
@@ -26,14 +24,21 @@ class Terminal:
     Manages console commands and dispatches them.
     """
 
-    def __init__(self, full_catalog: "gadgets.Gadgets"):
+    def __init__(self,
+        full_catalog: "gadgets.Gadgets",
+        formatter: "formatters.GadgetFormatter" = None,
+        with_base_address: bool=False
+    ):
         self._gadgets = full_catalog
+        self._formatter = formatter
+        self._with_base_address = with_base_address
 
         self._commands = {
             "exit": self.exit_command,
             "clear": self.clear_command,
             "list": self.list_gadgets,
             "uniq": self.toggle_uniqueness,
+            "style": self.change_style,
             "help": self.show_help,
             "?": self.exact_search,
             "/": self.partial_search,
@@ -57,6 +62,35 @@ class Terminal:
             "pop": self.pop_to_register,
             "pivot": self.stack_pivot,
         }
+
+    def change_style(self, style_name: str = None) -> None:
+        """Change output format style (e.g., style python, style cpp)"""
+        
+        from . import formatters  # Import here to avoid circular dependency
+        
+        style_map = {
+            "plain": formatters.PlainFormatter,
+            "python": formatters.PythonFormatter,
+            "cpp": formatters.CppFormatter,
+            "js": formatters.JavaScriptFormatter,
+        }
+        
+        if not style_name:
+            # Show current style
+            current = type(self._formatter).__name__.replace('Formatter', '').lower()
+            print(f"[i] Current style: {current}")
+            print(f"[i] Available styles: {', '.join(style_map.keys())}")
+            return
+        
+        style_name = style_name.lower()
+        
+        if style_name not in style_map:
+            print(f"[!] Unknown style '{style_name}'")
+            print(f"[i] Available styles: {', '.join(style_map.keys())}")
+            return
+        
+        self._formatter = style_map[style_name]()
+        print(f"[+] Output style changed to: {style_name}")
     
     def toggle_uniqueness(self, mode: str = None):
         """Toggle uniqueness filtering (uniq on/off)"""
@@ -122,6 +156,7 @@ class Terminal:
                 "clear": "Clear the terminal screen",
                 "list": "List all gadgets",
                 "uniq": "Toggle uniqueness filtering (uniq on/off)",
+                "style": "Change output format (style python/cpp/js/plain)"
             },
             "Search": {
                 "?": "Exact search (e.g., ? pop eax ; ret)",
@@ -723,7 +758,7 @@ class Terminal:
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
 
-    def start(self, formatter: "GadgetFormatter", with_base_address: bool=False) -> int:
+    def start(self) -> int:
         session = PromptSession(
             cursor=CursorShape.BLINKING_BEAM,
             multiline=False,

@@ -96,9 +96,7 @@ def main() -> int:
     # Filter for unique gadgets if -u flag is set
     if args.unique:
         catalog.set_uniqueness(True)
-
-    console = terminal.Terminal(catalog)
-
+    
     style_map = {
         "plain": formatters.PlainFormatter,
         "python": formatters.PythonFormatter,
@@ -108,4 +106,6 @@ def main() -> int:
 
     formatter = style_map[args.style]()
 
-    return console.start(formatter=formatter, with_base_address=args.offset)
+    console = terminal.Terminal(catalog, formatter=formatter, with_base_address=args.offset)
+
+    return console.start()
