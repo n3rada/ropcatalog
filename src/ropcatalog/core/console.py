@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import os
 import sys
+import re
 
 # Third party library imports
 from prompt_toolkit import PromptSession
