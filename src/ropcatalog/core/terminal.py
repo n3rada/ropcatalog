@@ -227,7 +227,7 @@ class Terminal:
         print(f"[*] Partial search of '{instructions}'")
         return [g for g in self._gadgets if g.partial_match(instructions)]
     
-
+    # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_iretq(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
         print("[*] Finding kernel->user transition gadgets (swapgs ; iretq)")
