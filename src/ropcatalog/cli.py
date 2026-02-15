@@ -107,6 +107,4 @@ def main() -> int:
 
     formatter = style_map[args.style]()
 
-    console.start(formatter=formatter, with_base_address=args.offset)
-
-    return 0
+    return console.start(formatter=formatter, with_base_address=args.offset)
