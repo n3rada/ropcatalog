@@ -186,83 +186,103 @@ class Terminal:
         
         print(f"[*] Finding stack pivot gadgets (mode: {mode})")
         
-        # Stack pointer registers for different architectures
-        stack_regs_32 = ["esp"]
-        stack_regs_64 = ["rsp"]
-        
-        # Register-based pivot patterns
+        # Register-based pivot patterns - MUST be actual assignment to stack pointer
         reg_patterns_32 = [
-            rf"mov esp, (\w+)",
-            rf"xchg esp, (\w+)",
-            rf"lea esp, \[(\w+).*\]",
-            rf"add esp, (\w+)",
-            rf"sub esp, (\w+)",
+            rf"^mov esp, (\w+)",
+            rf"^xchg esp, (\w+)",
+            rf"^lea esp, \[(\w+)\]",
         ]
         
         reg_patterns_64 = [
-            rf"mov rsp, (\w+)",
-            rf"xchg rsp, (\w+)",
-            rf"lea rsp, \[(\w+).*\]",
-            rf"add rsp, (\w+)",
-            rf"sub rsp, (\w+)",
+            rf"^mov rsp, (\w+)",
+            rf"^xchg rsp, (\w+)",
+            rf"^lea rsp, \[(\w+)\]",
         ]
         
-        # Immediate value pivot patterns
+        # Immediate value pivot patterns - MUST directly set stack pointer
         imm_patterns_32 = [
             rf"mov esp, 0x[0-9a-fA-F]+",
-            rf"lea esp, \[0x[0-9a-fA-F]+\]",
-            rf"add esp, 0x[0-9a-fA-F]+",
-            rf"sub esp, 0x[0-9a-fA-F]+",
         ]
         
         imm_patterns_64 = [
             rf"mov rsp, 0x[0-9a-fA-F]+",
-            rf"mov esp, 0x[0-9a-fA-F]+",  # 32-bit mov into 64-bit register
-            rf"lea rsp, \[0x[0-9a-fA-F]+\]",
-            rf"add rsp, 0x[0-9a-fA-F]+",
-            rf"sub rsp, 0x[0-9a-fA-F]+",
+            rf"mov esp, 0x[0-9a-fA-F]+",  # 32-bit mov into 64-bit register (zeros upper bits)
         ]
         
         for gadget in self._gadgets:
             arch = gadget.arch if hasattr(gadget, 'arch') else 'x86'
             
-            # Determine which patterns to use based on architecture
+            # Determine which patterns to use
             if arch == 'x64':
                 reg_patterns = reg_patterns_64
                 imm_patterns = imm_patterns_64
+                stack_reg = "rsp"
             else:
                 reg_patterns = reg_patterns_32
                 imm_patterns = imm_patterns_32
+                stack_reg = "esp"
             
             # Check register-based pivots
             if mode in ["all", "reg"]:
-                if matches := gadget.pattern_match(reg_patterns):
-                    for match in matches:
-                        matched_instruction = match.group(0)
+                for pattern in reg_patterns:
+                    if match := re.search(pattern, gadget.raw, re.IGNORECASE):
                         source_reg = match.group(1)
                         
-                        if matched_instruction not in gadget.instructions:
-                            continue
-                        
-                        # Ensure source is actually a register for register mode
+                        # Must be a valid register
                         if gadgets.is_register(source_reg, arch=arch):
-                            matched_index = gadget.instructions.index(matched_instruction)
-                            remaining_instructions = gadget.instructions[matched_index + 1:]
+                            # Instruction should be early in the gadget (ideally first)
+                            instructions = gadget.raw.split(" ; ")
+                            pivot_instruction = match.group(0)
                             
-                            # Ideally stack pointer shouldn't be modified after pivot
-                            stack_reg = "rsp" if arch == 'x64' else "esp"
-                            if not gadget.is_register_modified(stack_reg, remaining_instructions):
-                                results.append(gadget)
-                                break  # Avoid duplicates for same gadget
+                            # Find position of pivot in gadget
+                            try:
+                                pivot_idx = next(i for i, instr in enumerate(instructions) if pivot_instruction in instr)
+                                
+                                # Pivot should be near the start (first 2 instructions max)
+                                # and preferably no stack pointer modifications after
+                                if pivot_idx <= 1:
+                                    remaining = instructions[pivot_idx + 1:]
+                                    # Check no further ESP/RSP modifications
+                                    has_sp_mod = any(stack_reg in instr and ('mov' in instr or 'add' in instr or 'sub' in instr) 
+                                                for instr in remaining if 'ret' not in instr)
+                                    if not has_sp_mod:
+                                        results.append(gadget)
+                                        break
+                            except StopIteration:
+                                continue
             
             # Check immediate value pivots
             if mode in ["all", "imm"]:
-                if gadget.regex(imm_patterns):
-                    # For immediate pivots, we just need to verify it exists
-                    results.append(gadget)
+                for pattern in imm_patterns:
+                    if match := re.search(pattern, gadget.raw, re.IGNORECASE):
+                        # Extract the immediate value
+                        imm_match = re.search(r"0x([0-9a-fA-F]+)", match.group(0))
+                        if imm_match:
+                            imm_value = int(imm_match.group(1), 16)
+                            
+                            # Filter for potentially useful addresses
+                            # User-mode range: < 0x80000000 or reasonable kernel addresses
+                            if imm_value < 0x80000000 or (0x80000000 <= imm_value <= 0xFFFFFFFF):
+                                instructions = gadget.raw.split(" ; ")
+                                pivot_instruction = match.group(0)
+                                
+                                try:
+                                    pivot_idx = next(i for i, instr in enumerate(instructions) if pivot_instruction in instr)
+                                    
+                                    # Should be early in gadget
+                                    if pivot_idx <= 1:
+                                        remaining = instructions[pivot_idx + 1:]
+                                        # Ideally just "ret" after, or minimal side effects
+                                        has_sp_mod = any(stack_reg in instr and ('mov' in instr or 'add' in instr or 'sub' in instr)
+                                                    for instr in remaining if 'ret' not in instr)
+                                        if not has_sp_mod:
+                                            results.append(gadget)
+                                            break
+                                except StopIteration:
+                                    continue
         
         return results
-    
+        
     def copy_to_register(self, reg: str) -> list:
         """Find gadgets that copy into the given register (e.g., r9)"""
 
