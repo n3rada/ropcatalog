@@ -57,7 +57,7 @@ class Terminal:
             "zero": self.zero,
             "ppr": self.find_ppr,
             "jump": self.find_jump_gadgets,
-            "iretq": self.find_iretq,
+            "transition": self.find_ktouser,
             "call": self.indirect_call,
             "push": self.push_register,
             "pop": self.pop_to_register,
@@ -189,7 +189,7 @@ class Terminal:
             "Control Flow": {
                 "jump": "Jump gadgets (e.g., jump esp)",
                 "call": "Indirect call gadgets (e.g., call rax)",
-                "iretq": "Kernel->user transition (swapgs ; iretq)",
+                "transition": "Kernel->user transition (swapgs ; iretq)",
             },
         }
         
@@ -228,7 +228,7 @@ class Terminal:
         return [g for g in self._gadgets if g.partial_match(instructions)]
     
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
-    def find_iretq(self, fake_arg=None) -> list:
+    def find_ktouser(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
         print("[*] Finding kernel->user transition gadgets (swapgs ; iretq)")
         
