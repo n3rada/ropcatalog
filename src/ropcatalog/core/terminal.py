@@ -57,6 +57,7 @@ class Terminal:
             "zero": self.zero,
             "ppr": self.find_ppr,
             "jump": self.find_jump_gadgets,
+            "iretq": self.find_iretq,
             "call": self.indirect_call,
             "push": self.push_register,
             "pop": self.pop_to_register,
@@ -188,6 +189,7 @@ class Terminal:
             "Control Flow": {
                 "jump": "Jump gadgets (e.g., jump esp)",
                 "call": "Indirect call gadgets (e.g., call rax)",
+                "iretq": "Kernel->user transition (swapgs ; iretq)",
             },
         }
         
@@ -224,6 +226,18 @@ class Terminal:
 
         print(f"[*] Partial search of '{instructions}'")
         return [g for g in self._gadgets if g.partial_match(instructions)]
+    
+
+    def find_iretq(self, fake_arg=None) -> list:
+        """Find kernel->user transition gadgets (swapgs ; iretq)"""
+        print("[*] Finding kernel->user transition gadgets (swapgs ; iretq)")
+        
+        patterns = [
+            r"swapgs\s*;\s*iretq",
+            r"swapgs\s*;\s*iret",
+        ]
+        
+        return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
     def copy_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modifcation of copied register allowed."""
