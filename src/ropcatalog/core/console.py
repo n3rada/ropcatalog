@@ -67,8 +67,6 @@ class Console:
         else:
             print("[!] Usage: uniq on | uniq off")
 
-
-
     def execute(self, command_input: str) -> list:
         """
         Executes the command based on the input.
@@ -170,6 +168,98 @@ class Console:
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
                 results.append(gadget)
 
+        return results
+
+    def stack_pivot(self, args: str = None) -> list:
+        """Find stack pivot gadgets (e.g., 'pivot' for all, 'pivot reg' for register-based, 'pivot imm' for immediate values)"""
+        
+        results = []
+        mode = args.strip().lower() if args else "all"
+        
+        if mode not in ["all", "reg", "imm"]:
+            print("[!] Usage: pivot [all|reg|imm]")
+            print("\tall - Find all stack pivot gadgets (default)")
+            print("\treg - Find register-based pivots (mov esp, <reg>)")
+            print("\timm - Find immediate value pivots (mov esp, 0x########)")
+            return []
+        
+        print(f"[*] Finding stack pivot gadgets (mode: {mode})")
+        
+        # Stack pointer registers for different architectures
+        stack_regs_32 = ["esp"]
+        stack_regs_64 = ["rsp"]
+        
+        # Register-based pivot patterns
+        reg_patterns_32 = [
+            rf"mov esp, (\w+)",
+            rf"xchg esp, (\w+)",
+            rf"lea esp, \[(\w+).*\]",
+            rf"add esp, (\w+)",
+            rf"sub esp, (\w+)",
+        ]
+        
+        reg_patterns_64 = [
+            rf"mov rsp, (\w+)",
+            rf"xchg rsp, (\w+)",
+            rf"lea rsp, \[(\w+).*\]",
+            rf"add rsp, (\w+)",
+            rf"sub rsp, (\w+)",
+        ]
+        
+        # Immediate value pivot patterns
+        imm_patterns_32 = [
+            rf"mov esp, 0x[0-9a-fA-F]+",
+            rf"lea esp, \[0x[0-9a-fA-F]+\]",
+            rf"add esp, 0x[0-9a-fA-F]+",
+            rf"sub esp, 0x[0-9a-fA-F]+",
+        ]
+        
+        imm_patterns_64 = [
+            rf"mov rsp, 0x[0-9a-fA-F]+",
+            rf"mov esp, 0x[0-9a-fA-F]+",  # 32-bit mov into 64-bit register
+            rf"lea rsp, \[0x[0-9a-fA-F]+\]",
+            rf"add rsp, 0x[0-9a-fA-F]+",
+            rf"sub rsp, 0x[0-9a-fA-F]+",
+        ]
+        
+        for gadget in self._gadgets:
+            arch = gadget.arch if hasattr(gadget, 'arch') else 'x86'
+            
+            # Determine which patterns to use based on architecture
+            if arch == 'x64':
+                reg_patterns = reg_patterns_64
+                imm_patterns = imm_patterns_64
+            else:
+                reg_patterns = reg_patterns_32
+                imm_patterns = imm_patterns_32
+            
+            # Check register-based pivots
+            if mode in ["all", "reg"]:
+                if matches := gadget.pattern_match(reg_patterns):
+                    for match in matches:
+                        matched_instruction = match.group(0)
+                        source_reg = match.group(1)
+                        
+                        if matched_instruction not in gadget.instructions:
+                            continue
+                        
+                        # Ensure source is actually a register for register mode
+                        if gadgets.is_register(source_reg, arch=arch):
+                            matched_index = gadget.instructions.index(matched_instruction)
+                            remaining_instructions = gadget.instructions[matched_index + 1:]
+                            
+                            # Ideally stack pointer shouldn't be modified after pivot
+                            stack_reg = "rsp" if arch == 'x64' else "esp"
+                            if not gadget.is_register_modified(stack_reg, remaining_instructions):
+                                results.append(gadget)
+                                break  # Avoid duplicates for same gadget
+            
+            # Check immediate value pivots
+            if mode in ["all", "imm"]:
+                if gadget.regex(imm_patterns):
+                    # For immediate pivots, we just need to verify it exists
+                    results.append(gadget)
+        
         return results
     
     def copy_to_register(self, reg: str) -> list:
