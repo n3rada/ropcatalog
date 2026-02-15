@@ -186,103 +186,90 @@ class Terminal:
         
         print(f"[*] Finding stack pivot gadgets (mode: {mode})")
         
-        # Register-based pivot patterns - MUST be actual assignment to stack pointer
-        reg_patterns_32 = [
-            rf"^mov esp, (\w+)",
-            rf"^xchg esp, (\w+)",
-            rf"^lea esp, \[(\w+)\]",
-        ]
-        
-        reg_patterns_64 = [
-            rf"^mov rsp, (\w+)",
-            rf"^xchg rsp, (\w+)",
-            rf"^lea rsp, \[(\w+)\]",
-        ]
-        
-        # Immediate value pivot patterns - MUST directly set stack pointer
-        imm_patterns_32 = [
-            rf"mov esp, 0x[0-9a-fA-F]+",
-        ]
-        
-        imm_patterns_64 = [
-            rf"mov rsp, 0x[0-9a-fA-F]+",
-            rf"mov esp, 0x[0-9a-fA-F]+",  # 32-bit mov into 64-bit register (zeros upper bits)
-        ]
-        
         for gadget in self._gadgets:
             arch = gadget.arch if hasattr(gadget, 'arch') else 'x86'
+            stack_reg = "rsp" if arch == 'x64' else "esp"
             
-            # Determine which patterns to use
-            if arch == 'x64':
-                reg_patterns = reg_patterns_64
-                imm_patterns = imm_patterns_64
-                stack_reg = "rsp"
-            else:
-                reg_patterns = reg_patterns_32
-                imm_patterns = imm_patterns_32
-                stack_reg = "esp"
+            instructions = gadget.raw.split(" ; ")
             
-            # Check register-based pivots
+            # Only reject gadgets that DON'T end in ret/retn at all
+            last_instr = instructions[-1].strip().lower()
+            if not (last_instr == 'ret' or last_instr.startswith('retn') or last_instr == 'iretq'):
+                continue
+            
+            # Register-based pivots
             if mode in ["all", "reg"]:
-                for pattern in reg_patterns:
-                    if match := re.search(pattern, gadget.raw, re.IGNORECASE):
-                        source_reg = match.group(1)
-                        
-                        # Must be a valid register
-                        if gadgets.is_register(source_reg, arch=arch):
-                            # Instruction should be early in the gadget (ideally first)
-                            instructions = gadget.raw.split(" ; ")
-                            pivot_instruction = match.group(0)
+                reg_patterns = [
+                    rf"mov {stack_reg}, (\w+)",
+                    rf"xchg {stack_reg}, (\w+)",
+                ]
+                
+                for i, instr in enumerate(instructions):
+                    for pattern in reg_patterns:
+                        if match := re.search(pattern, instr.strip(), re.IGNORECASE):
+                            source_reg = match.group(1)
                             
-                            # Find position of pivot in gadget
-                            try:
-                                pivot_idx = next(i for i, instr in enumerate(instructions) if pivot_instruction in instr)
-                                
-                                # Pivot should be near the start (first 2 instructions max)
-                                # and preferably no stack pointer modifications after
-                                if pivot_idx <= 1:
-                                    remaining = instructions[pivot_idx + 1:]
-                                    # Check no further ESP/RSP modifications
-                                    has_sp_mod = any(stack_reg in instr and ('mov' in instr or 'add' in instr or 'sub' in instr) 
-                                                for instr in remaining if 'ret' not in instr)
-                                    if not has_sp_mod:
+                            if gadgets.is_register(source_reg, arch=arch):
+                                if i <= len(instructions) // 2:
+                                    remaining = instructions[i+1:]
+                                    
+                                    clobbered = any(
+                                        re.search(rf"mov {stack_reg},", instr, re.IGNORECASE) or
+                                        re.search(rf"xchg {stack_reg},", instr, re.IGNORECASE) or
+                                        re.search(rf"lea {stack_reg},", instr, re.IGNORECASE)
+                                        for instr in remaining
+                                    )
+                                    
+                                    if not clobbered:
                                         results.append(gadget)
                                         break
-                            except StopIteration:
-                                continue
             
-            # Check immediate value pivots
+            # Immediate value pivots
             if mode in ["all", "imm"]:
-                for pattern in imm_patterns:
-                    if match := re.search(pattern, gadget.raw, re.IGNORECASE):
-                        # Extract the immediate value
-                        imm_match = re.search(r"0x([0-9a-fA-F]+)", match.group(0))
-                        if imm_match:
-                            imm_value = int(imm_match.group(1), 16)
+                imm_patterns = [
+                    rf"mov {stack_reg}, (0x[0-9a-fA-F]+)",
+                    rf"mov esp, (0x[0-9a-fA-F]+)" if arch == 'x64' else None,
+                ]
+                imm_patterns = [p for p in imm_patterns if p]
+                
+                for i, instr in enumerate(instructions):
+                    for pattern in imm_patterns:
+                        if match := re.search(pattern, instr.strip(), re.IGNORECASE):
+                            imm_str = match.group(1)
+                            imm_value = int(imm_str, 16)
                             
-                            # Filter for potentially useful addresses
-                            # User-mode range: < 0x80000000 or reasonable kernel addresses
-                            if imm_value < 0x80000000 or (0x80000000 <= imm_value <= 0xFFFFFFFF):
-                                instructions = gadget.raw.split(" ; ")
-                                pivot_instruction = match.group(0)
-                                
-                                try:
-                                    pivot_idx = next(i for i, instr in enumerate(instructions) if pivot_instruction in instr)
+                            # Filter based on architecture
+                            is_reasonable = False
+                            
+                            if arch == 'x64':
+                                # On x64, MOV ESP, imm32 zero-extends to user-mode address
+                                # All 32-bit values are potentially useful (0x00000000XXXXXXXX)
+                                is_reasonable = (imm_value <= 0xFFFFFFFF)
+                            else:
+                                # On x86, filter out obviously bad addresses
+                                # NULL page and very high kernel addresses less useful
+                                is_reasonable = (
+                                    (0x00010000 <= imm_value <= 0x7FFFFFFF) or  # Standard user-mode
+                                    (0x80000000 <= imm_value <= 0xFFFFFFFF)     # Kernel or extended user
+                                )
+                            
+                            if is_reasonable:
+                                if i <= len(instructions) // 2:
+                                    remaining = instructions[i+1:]
                                     
-                                    # Should be early in gadget
-                                    if pivot_idx <= 1:
-                                        remaining = instructions[pivot_idx + 1:]
-                                        # Ideally just "ret" after, or minimal side effects
-                                        has_sp_mod = any(stack_reg in instr and ('mov' in instr or 'add' in instr or 'sub' in instr)
-                                                    for instr in remaining if 'ret' not in instr)
-                                        if not has_sp_mod:
-                                            results.append(gadget)
-                                            break
-                                except StopIteration:
-                                    continue
+                                    clobbered = any(
+                                        re.search(rf"mov {stack_reg},", instr, re.IGNORECASE) or
+                                        re.search(rf"xchg {stack_reg},", instr, re.IGNORECASE) or
+                                        re.search(rf"lea {stack_reg},", instr, re.IGNORECASE)
+                                        for instr in remaining
+                                    )
+                                    
+                                    if not clobbered:
+                                        results.append(gadget)
+                                        break
         
         return results
-        
+            
     def copy_to_register(self, reg: str) -> list:
         """Find gadgets that copy into the given register (e.g., r9)"""
 
