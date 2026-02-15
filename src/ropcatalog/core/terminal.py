@@ -190,9 +190,10 @@ class Terminal:
         print(f"[*] Finding stack pivot gadgets (mode: {mode})")
         
         for gadget in self._gadgets:
-            arch = gadget.arch if hasattr(gadget, 'arch') else 'x86'
+            arch = gadget.arch
             
-            instructions = gadget.raw.split(" ; ")
+            # Clean split - strip whitespace AND trailing semicolons
+            instructions = [i.strip().rstrip(';').strip() for i in gadget.raw.split(" ; ") if i.strip()]
             
             # Only accept gadgets ending in ret/retn/iretq
             last_instr = instructions[-1].strip().lower()
@@ -201,7 +202,6 @@ class Terminal:
             
             # Register-based pivots
             if mode in ["all", "reg"]:
-                # On x64, check both RSP and ESP (32-bit mov zeros upper bits)
                 stack_regs = ["rsp", "esp"] if arch == 'x64' else ["esp"]
                 
                 for stack_reg in stack_regs:
@@ -218,7 +218,6 @@ class Terminal:
                                 if gadgets.is_register(source_reg, arch=arch):
                                     remaining = instructions[i+1:-1]
                                     
-                                    # Check if any stack register gets clobbered
                                     clobbered = any(
                                         re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
                                         re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
@@ -232,12 +231,11 @@ class Terminal:
             
             # Immediate value pivots
             if mode in ["all", "imm"]:
-                # On x64, check both RSP and ESP
                 imm_patterns = []
                 if arch == 'x64':
                     imm_patterns = [
                         rf"mov rsp, (0x[0-9a-fA-F]+)",
-                        rf"mov esp, (0x[0-9a-fA-F]+)",  # 32-bit mov zeros upper 32 bits
+                        rf"mov esp, (0x[0-9a-fA-F]+)",
                     ]
                 else:
                     imm_patterns = [rf"mov esp, (0x[0-9a-fA-F]+)"]
@@ -248,20 +246,15 @@ class Terminal:
                             imm_str = match.group(1)
                             imm_value = int(imm_str, 16)
                             
-                            # Filter based on architecture
                             is_reasonable = False
-                            
                             if arch == 'x64':
-                                # All 32-bit values are valid (zero-extend to user-mode)
                                 is_reasonable = (imm_value <= 0xFFFFFFFF)
                             else:
-                                # On x86, exclude NULL page
                                 is_reasonable = (imm_value >= 0x00010000)
                             
                             if is_reasonable:
                                 remaining = instructions[i+1:-1]
                                 
-                                # Check if any stack register gets clobbered
                                 clobbered = any(
                                     re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
                                     re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
@@ -274,7 +267,7 @@ class Terminal:
                                     break
         
         return results
-            
+ 
     def copy_to_register(self, reg: str) -> list:
         """Find gadgets that copy into the given register (e.g., r9)"""
 
