@@ -59,9 +59,12 @@ class Terminal:
         }
     
     def toggle_uniqueness(self, mode: str = None):
-        """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
+        """Toggle uniqueness filtering (uniq on/off)"""
         if not mode:
-            print(f"[i] Current uniqueness mode: {'on' if self._gadgets._unique_mode else 'off'}")
+            # When called without arguments, toggle the current state
+            new_state = not self._gadgets._unique_mode
+            self._gadgets.set_uniqueness(new_state)
+            print(f"[+] Uniqueness mode toggled to: {'on' if new_state else 'off'}")
             return
 
         if mode.lower() == "on":
@@ -69,7 +72,8 @@ class Terminal:
         elif mode.lower() == "off":
             self._gadgets.set_uniqueness(False)
         else:
-            print("[!] Usage: uniq on | uniq off")
+            print("[!] Usage: uniq [on|off]")
+            print("\tNo argument toggles current state")
 
     def execute(self, command_input: str) -> list:
         """
@@ -717,19 +721,6 @@ class Terminal:
         print(f"[*] Searching with regex '{pattern}'")
 
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
-    
-    def toggle_uniqueness(self, mode: str = None):
-        """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
-        if not mode:
-            print(f"[i] Current uniqueness mode: {'on' if self._gadgets._unique_mode else 'off'}")
-            return
-
-        if mode.lower() == "on":
-            self._gadgets.set_uniqueness(True)
-        elif mode.lower() == "off":
-            self._gadgets.set_uniqueness(False)
-        else:
-            print("[!] Usage: uniq on | uniq off")
 
 
     def start(self, formatter: "GadgetFormatter", with_base_address: bool=False) -> int:
