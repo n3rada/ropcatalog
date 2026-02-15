@@ -1,4 +1,4 @@
-# ropcatalog/core/console.py
+# ropcatalog/core/terminal.py
 
 # Built-in imports
 from typing import TYPE_CHECKING
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .formatters import GadgetFormatter
 
 
-class Console:
+class Terminal:
     """
     Manages console commands and dispatches them.
     """

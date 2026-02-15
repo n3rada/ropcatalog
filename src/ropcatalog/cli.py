@@ -6,7 +6,7 @@ from pathlib import Path
 from .core import gadgets
 from .core import utils
 from .core import formatters
-from .core import console
+from .core import terminal
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,7 +89,6 @@ def main() -> int:
 
     catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, arch=arch)
 
-
     if len(catalog) == 0:
         print("[!] No gadgets available, try another module")
         return 1
@@ -98,7 +97,7 @@ def main() -> int:
     if args.unique:
         catalog.set_uniqueness(True)
 
-    current_console = console.Console(catalog)
+    console = terminal.Terminal(catalog)
 
     style_map = {
         "plain": formatters.PlainFormatter,
@@ -108,6 +107,6 @@ def main() -> int:
 
     formatter = style_map[args.style]()
 
-    current_console.start(formatter=formatter, with_base_address=args.offset)
+    console.start(formatter=formatter, with_base_address=args.offset)
 
     return 0
