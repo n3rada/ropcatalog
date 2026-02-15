@@ -781,7 +781,7 @@ class Terminal:
                 if results:
                     results = sorted(results, key=gadgets.sort_key, reverse=True)
                     for gadget in results:
-                        print(formatter.format(gadget, with_base_address))
+                        print(self._formatter.format(gadget, with_base_address))
 
                     print(f"---- {len(results)} gadget(s)")
             except KeyboardInterrupt:
