@@ -29,31 +29,34 @@ class Terminal:
     def __init__(self, full_catalog: "gadgets.Gadgets"):
         self._gadgets = full_catalog
 
-        self._commands = {
-            "exit": self.exit_command,
-            "clear": self.clear_command,
-            "list": self.list_gadgets,
-            "uniq": self.toggle_uniqueness,
-            "help": self.show_help,
-            "?": self.exact_search,
-            "/": self.partial_search,
-            "copy": self.copy_register,
-            "copyto": self.copy_to_register,
-            "save": self.save_register,
-            "saveto": self.save_to_register,
-            "inc": self.increment_register,
-            "dec": self.decrement_register,
-            "deref": self.dereference_register,
-            "memoff": self.memory_offset_search,
-            ".": self.regex_search,
-            "swap": self.swap_register,
-            "zero": self.zero,
-            "ppr": self.find_ppr,
-            "jump": self.find_jump_gadgets,
-            "push": self.push_register,
-            "pop": self.pop_to_register,
-            "pivot": self.stack_pivot,
-        }
+    self._commands = {
+        "exit": self.exit_command,
+        "clear": self.clear_command,
+        "list": self.list_gadgets,
+        "uniq": self.toggle_uniqueness,
+        "help": self.show_help,
+        "?": self.exact_search,
+        "/": self.partial_search,
+        "copy": self.copy_register,
+        "copyto": self.copy_to_register,
+        "save": self.save_register,
+        "saveto": self.save_to_register,
+        "inc": self.increment_register,
+        "dec": self.decrement_register,
+        "read": self.dereference_register,  # Alias for deref
+        "deref": self.dereference_register,
+        "write": self.write_primitive,
+        "memoff": self.memory_offset_search,
+        ".": self.regex_search,
+        "swap": self.swap_register,
+        "zero": self.zero,
+        "ppr": self.find_ppr,
+        "jump": self.find_jump_gadgets,
+        "call": self.indirect_call,
+        "push": self.push_register,
+        "pop": self.pop_to_register,
+        "pivot": self.stack_pivot,
+    }
     
     def toggle_uniqueness(self, mode: str = None):
         """Enable or disable uniqueness filtering (e.g., 'uniq on' or 'uniq off')"""
@@ -104,6 +107,66 @@ class Terminal:
 
     # Command methods
 
+    def show_help(self, fake_arg=None) -> None:
+        """Show available commands"""
+        
+        # Group commands by category
+        categories = {
+            "General": {
+                "help": "Show this help message",
+                "exit": "Exit ropcatalog",
+                "clear": "Clear the terminal screen",
+                "list": "List all gadgets",
+                "uniq": "Toggle uniqueness filtering (uniq on/off)",
+            },
+            "Search": {
+                "?": "Exact search (e.g., ? pop eax ; ret)",
+                "/": "Partial search (e.g., / pop)",
+                ".": "Regex search (e.g., . mov.*rax)",
+                "memoff": "Memory offset search (e.g., memoff rbx+0x20)",
+            },
+            "Register Operations": {
+                "copy": "Copy register to another (e.g., copy rax)",
+                "copyto": "Copy into register (e.g., copyto r9)",
+                "save": "Save register without modification (e.g., save rbx)",
+                "saveto": "Save into register without modification (e.g., saveto rcx)",
+                "swap": "Swap registers (e.g., swap eax)",
+                "zero": "Zero a register (e.g., zero rax)",
+                "inc": "Increment register (e.g., inc eax)",
+                "dec": "Decrement register (e.g., dec edx)",
+            },
+            "Memory Operations": {
+                "read": "Read from memory (e.g., read rbx finds mov rax, [rbx])",
+                "write": "Write to memory (e.g., write rcx finds mov [rax], rcx)",
+                "deref": "Alias for 'read'",
+            },
+            "Stack Operations": {
+                "push": "Push register to stack (e.g., push rax)",
+                "pop": "Pop from stack to register (e.g., pop rbx)",
+                "ppr": "Find pop-pop-ret sequences",
+                "pivot": "Stack pivot gadgets (pivot all/reg/imm)",
+            },
+            "Control Flow": {
+                "jump": "Jump gadgets (e.g., jump esp)",
+                "call": "Indirect call gadgets (e.g., call rax)",
+            },
+        }
+        
+        print("\n" + "="*70)
+        print("  ROPCATALOG - Available Commands")
+        print("="*70)
+        
+        for category, commands in categories.items():
+            print(f"\n{category}:")
+            print("-" * 70)
+            for cmd, desc in commands.items():
+                print(f"  {cmd:<10} {desc}")
+        
+        print("\n" + "="*70)
+        print("Modifiers:")
+        print("  /n         Disable bad operation filtering (e.g., jump esp /n)")
+        print("="*70 + "\n")
+
     def exit_command(self, fake_arg=None) -> bool:
         """Exit"""
         return True
@@ -115,14 +178,6 @@ class Terminal:
     def list_gadgets(self, fake_arg=None) -> list:
         """List all gadgets"""
         return self._gadgets
-
-    def show_help(self, fake_arg=None) -> None:
-        print("Available commands:")
-        for cmd, func in self._commands.items():
-            print(f"  {cmd:<5} - {func.__doc__}")
-
-        print("\nModifiers:")
-        print("  /n   - Disables filtering for bad operations (e.g., jump esp /n).")
 
     def exact_search(self, instructions: str) -> list:
         """Exact search for gadgets (e.g., ? pop eax ; ret)"""
@@ -484,9 +539,9 @@ class Terminal:
         return [g for g in self._gadgets if g.regex(patterns)]
 
     def dereference_register(self, reg: str) -> list:
-        """Find gadgets that dereference a register (e.g., mov eax, [eax])"""
-
-        print(f"[*] Finding gadgets that deref {reg} register")
+        """Read from memory (e.g., read rbx finds mov rax, [rbx])"""
+        
+        print(f"[*] Finding gadgets that read from memory pointed by {reg}")
 
         results = []
 
@@ -585,6 +640,53 @@ class Terminal:
             rf"and {reg}, 0 ;",
         ]
 
+        return [g for g in self._gadgets if g.regex(patterns)]
+
+    def write_primitive(self, reg: str = None) -> list:
+        """Write register to memory (e.g., write rbx finds mov [rax], rbx)"""
+        
+        if not reg:
+            print("[!] Usage: write <source_register>")
+            return []
+        
+        print(f"[*] Finding gadgets that write {reg} to memory")
+        
+        results = []
+        patterns = [
+            rf"mov (?:qword ptr )?\[(\w+)\], {reg}",
+            rf"mov (?:dword ptr )?\[(\w+)\], {reg}",
+            rf"mov (?:qword ptr )?\[(\w+)\s*[+\-]\s*0x[0-9a-fA-F]+\], {reg}",
+        ]
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    ptr_reg = match.group(1)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    if not gadget.is_register_modified(ptr_reg, remaining_instructions):
+                        results.append(gadget)
+                        break
+        
+        return results
+
+    def indirect_call(self, reg: str) -> list:
+        """Indirect call gadgets (e.g., call rax, call [rbx+0x10])"""
+        
+        print(f"[*] Finding indirect call gadgets for {reg}")
+        
+        patterns = [
+            rf"call {reg}",
+            rf"call (?:qword ptr )?\[{reg}\]",
+            rf"call (?:qword ptr )?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\]",
+        ]
+        
         return [g for g in self._gadgets if g.regex(patterns)]
     
     def memory_offset_search(self, arg: str):
