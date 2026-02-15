@@ -1,3 +1,6 @@
+# ropcatalog/core/formatters.py
+
+# Built-in imports
 import re
 
 class GadgetFormatter:

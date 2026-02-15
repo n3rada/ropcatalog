@@ -1,12 +1,21 @@
 # ropcatalog/core/console.py
 
+# Built-in imports
+from typing import TYPE_CHECKING
+
+import os
+import sys
+
+if TYPE_CHECKING:
+    from .gadgets import Gadgets
+    from .formatters import GadgetFormatter
 
 class Console:
     """
     Manages console commands and dispatches them.
     """
 
-    def __init__(self, full_catalog: gadgets.Gadgets):
+    def __init__(self, full_catalog: "Gadgets"):
         self._gadgets = full_catalog
 
         self._commands = {
@@ -518,7 +527,7 @@ class Console:
             print("[!] Usage: uniq on | uniq off")
 
 
-    def start(self, formatter: formatters.GadgetFormatter, with_base_address: bool=False) -> None:
+    def start(self, formatter: "GadgetFormatter", with_base_address: bool=False) -> None:
         session = PromptSession(
             cursor=CursorShape.BLINKING_BEAM,
             multiline=False,
@@ -529,8 +538,6 @@ class Console:
             complete_while_typing=True,
             completer=WordCompleter(list(self._commands.keys()), ignore_case=True),
         )
-
-
 
         print()
         while True:

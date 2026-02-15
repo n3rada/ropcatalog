@@ -1,7 +1,9 @@
+# ropcatalog/core/gadgets.py
+
+# Built-in imports
 import re
 from pathlib import Path
 from typing import Union, List
-
 
 def sort_key(gadget: 'Gadget') -> tuple:
     instr_count = len(gadget.instructions)

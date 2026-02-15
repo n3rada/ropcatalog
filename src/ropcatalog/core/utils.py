@@ -1,3 +1,5 @@
+# ropcatalog/core/utils.py
+
 # Built-in imports
 import re
 from pathlib import Path
