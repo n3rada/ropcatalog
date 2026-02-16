@@ -54,6 +54,7 @@ class Terminal:
             "memoff": self.memory_offset_search,
             ".": self.regex_search,
             "swap": self.swap_register,
+            "offset": self.toggle_offset,
             "zero": self.zero,
             "ppr": self.find_ppr,
             "jump": self.find_jump_gadgets,
@@ -156,6 +157,7 @@ class Terminal:
                 "exit": "Exit ropcatalog",
                 "clear": "Clear the terminal screen",
                 "list": "List all gadgets",
+                "offset": "Toggle base address display (offset on/off)",
                 "uniq": "Toggle uniqueness filtering (uniq on/off)",
                 "style": "Change output format (style python/cpp/js/plain)"
             },
@@ -226,6 +228,25 @@ class Terminal:
 
         print(f"[*] Partial search of '{instructions}'")
         return [g for g in self._gadgets if g.partial_match(instructions)]
+
+    def toggle_offset(self, mode: str = None):
+        """Toggle base address offset display (offset on/off)"""
+        if not mode:
+            # When called without arguments, toggle the current state
+            self._with_base_address = not self._with_base_address
+            print(f"[+] Base address offset toggled to: {'on' if self._with_base_address else 'off'}")
+            return
+
+        if mode.lower() == "on":
+            self._with_base_address = True
+            print("[+] Base address offset enabled")
+        elif mode.lower() == "off":
+            self._with_base_address = False
+            print("[+] Base address offset disabled")
+        else:
+            print("[!] Usage: offset [on|off]")
+            print("\tNo argument toggles current state")
+
     
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
