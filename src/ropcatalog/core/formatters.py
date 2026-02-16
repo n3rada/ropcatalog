@@ -10,11 +10,8 @@ class GadgetFormatter:
 
 class CppFormatter(GadgetFormatter):
     def format(self, gadget, with_base_address=False) -> str:
-        # Convert module name to camelCase
-        module_camel = gadget.module[0].lower() + ''.join(
-            word.capitalize() for word in re.split(r'[\W_]+', gadget.module[1:])
-        )
-        base = f"{module_camel}Base + " if with_base_address else ""
+        # Use module name as-is, just append "Base"
+        base = f"{gadget.module}Base + " if with_base_address else ""
         return f"*rop++ = {base}{gadget.address}; // {gadget.raw} [{gadget.module}]"
 
 class PythonFormatter(GadgetFormatter):
