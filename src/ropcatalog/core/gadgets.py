@@ -243,10 +243,13 @@ class Gadgets:
         print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._gadgets)} gadgets)")
 
     def _filter_unique(self, gadgets_list):
+        """Filter for unique gadgets per module (same instruction, different addresses within same module)"""
         seen = {}
         for g in gadgets_list:
-            if g.raw not in seen:
-                seen[g.raw] = g
+            # Key by both module and raw instruction
+            key = (g.module, g.raw)
+            if key not in seen:
+                seen[key] = g
         return list(seen.values())
 
     def _parse_file(self, file_path: str) -> list:
