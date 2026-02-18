@@ -80,9 +80,18 @@ def main() -> int:
                 file_paths.append(path)
             else:
                 print(f"[!] Path '{path}' does not exist.")
-                return
+                return 1
         else:
             print(f"[!] Path '{path}' is not a valid file or directory.")
+            return 1
+
+    # Check if any files were found
+    if not file_paths:
+        print("[!] No files found in the specified path(s).")
+        print("[!] Make sure the directory contains gadget files (e.g., .txt files from rp++)")
+        return 1
+
+    print(f"[+] Found {len(file_paths)} file(s) to parse")
 
     arch = utils.detect_arch_from_file(file_paths[0])
     print(f"[+] Detected architecture: {arch}")
