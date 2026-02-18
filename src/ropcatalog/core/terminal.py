@@ -50,7 +50,8 @@ class Terminal:
             "dec": self.decrement_register,
             "read": self.dereference_register,  # Alias for deref
             "deref": self.dereference_register,
-            "write": self.write_primitive,
+            "writereg": self.write_register_to_memory,     # writereg rcx → mov [rax], rcx
+            "writeptr": self.write_to_register,   # writeptr rax → mov [rax], rcx
             "memoff": self.memory_offset_search,
             ".": self.regex_search,
             "swap": self.swap_register,
@@ -179,8 +180,9 @@ class Terminal:
             },
             "Memory Operations": {
                 "read": "Read from memory (e.g., read rbx finds mov rax, [rbx])",
-                "write": "Write to memory (e.g., write rcx finds mov [rax], rcx)",
                 "deref": "Alias for 'read'",
+                "writereg": "Write register to memory (e.g., writereg rcx finds mov [<any>], rcx)",
+                "writeptr": "Write to memory pointer (e.g., writeptr rax finds mov [rax], <any>)",
             },
             "Stack Operations": {
                 "push": "Push register to stack (e.g., push rax)",
@@ -712,27 +714,27 @@ class Terminal:
 
         return [g for g in self._gadgets if g.regex(patterns)]
 
-    def write_primitive(self, reg: str = None) -> list:
-        """Write register to memory (e.g., write rbx finds mov [rax], rbx)"""
+    def write_register_to_memory(self, reg: str = None) -> list:
+        """Write register to memory (e.g., write rcx finds mov [<any>], rcx)"""
         
         if not reg:
             print("[!] Usage: write <source_register>")
+            print("    Example: write rcx  (finds mov [rax], rcx)")
             return []
         
         print(f"[*] Finding gadgets that write {reg} to memory")
         
         results = []
-        patterns = [
-            rf"mov (?:qword ptr )?\[(\w+)\], {reg}",
-            rf"mov (?:dword ptr )?\[(\w+)\], {reg}",
-            rf"mov (?:qword ptr )?\[(\w+)\s*[+\-]\s*0x[0-9a-fA-F]+\], {reg}",
-        ]
+        
+        # Matches: mov [reg], rcx / mov qword [reg], rcx / mov qword ptr [reg], rcx
+        # Also matches with offsets: mov [reg+0x10], rcx
+        pattern = rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[(\w+)(?:\s*[+\-]\s*0x[0-9a-fA-F]+)?\],\s*{reg}"
         
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match(patterns):
+            if matches := gadget.pattern_match([pattern]):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    ptr_reg = match.group(1)
+                    ptr_reg = match.group(1)  # The pointer register (rax, rbx, etc.)
                     
                     if matched_instruction not in gadget.instructions:
                         continue
@@ -740,12 +742,54 @@ class Terminal:
                     matched_index = gadget.instructions.index(matched_instruction)
                     remaining_instructions = gadget.instructions[matched_index + 1:]
                     
+                    # Ensure pointer register isn't clobbered
                     if not gadget.is_register_modified(ptr_reg, remaining_instructions):
                         results.append(gadget)
                         break
         
         return results
 
+    def write_to_register(self, reg: str = None) -> list:
+        """Write to memory pointed by register (e.g., writeto rax finds mov [rax], <any>)"""
+        
+        if not reg:
+            print("[!] Usage: writeto <pointer_register>")
+            print("    Example: writeto rax  (finds mov [rax], rcx)")
+            return []
+        
+        print(f"[*] Finding gadgets that write to memory pointed by {reg}")
+        
+        results = []
+        
+        # Matches: mov [rax], <any> / mov qword [rax], <any> / mov [rax+0x10], <any>
+        patterns = [
+            rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[{reg}\],\s*(\w+)",                    # mov [rax], rcx
+            rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\],\s*(\w+)"  # mov [rax+0x10], rcx
+        ]
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    source_reg = match.group(1)  # The source register being written
+                    
+                    # Validate it's actually a register (not an immediate like 0x0)
+                    if not gadgets.is_register(source_reg, arch=gadget.arch):
+                        continue
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    # Ensure pointer register isn't clobbered
+                    if not gadget.is_register_modified(reg, remaining_instructions):
+                        results.append(gadget)
+                        break
+        
+        return results
+    
     def indirect_call(self, reg: str) -> list:
         """Indirect call gadgets (e.g., call rax, call [rbx+0x10])"""
         
