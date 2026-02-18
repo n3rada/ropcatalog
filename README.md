@@ -39,6 +39,11 @@ Then, you can use `ropcatalog` to help you leaf through the gadget catalog:
 ropcatalog ~/dump/libeay32IBM019.txt
 ```
 
+Or even directly with a folder containing multiple `rp++` output files:
+```shell
+ropcatalog.exe .\gadgets\ -o -u -s cpp
+```
+
 ## Quickstart
 
 Dump gadgets using `rp++`:
