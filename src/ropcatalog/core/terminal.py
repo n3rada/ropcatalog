@@ -67,12 +67,13 @@ class Terminal:
             "writebyte": self.write_byte,
             "nop": self.find_nop,
             "syscall": self.find_syscall,
+            "loadcr": self.load_cr,
         }
 
     def change_style(self, style_name: str = None) -> None:
         """Change output format style (e.g., style python, style cpp)"""
         
-        from . import formatters  # Import here to avoid circular dependency
+        from . import formatters
         
         style_map = {
             "plain": formatters.PlainFormatter,
@@ -199,6 +200,7 @@ class Terminal:
                 "call": "Indirect call gadgets (e.g., call rax)",
                 "transition": "Kernel->user transition (swapgs ; iretq)",
                 "syscall": "Syscall/sysenter gadgets",
+                "loadcr": "Load control register (e.g., loadcr rcx finds mov cr4, rcx)",
                 "nop": "NOP sequences for padding/alignment",
             },
         }
@@ -267,6 +269,34 @@ class Terminal:
         ]
         
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
+    
+    def load_cr(self, reg: str = None) -> list:
+        """Find gadgets that load control registers (e.g., loadcr rcx finds mov cr4, rcx)"""
+        
+        if not reg:
+            print("[!] Usage: loadcr <source_register>")
+            print("\tExample: loadcr rcx  (finds mov cr4, rcx)")
+            print("\tUse: SMEP/SMAP bypass, write protection disable")
+            return []
+        
+        print(f"[*] Finding gadgets that load control registers from {reg}")
+        
+        # x64 uses full register names (rcx), x86 uses 32-bit (ecx)
+        # CR registers are the same across architectures
+        patterns = [
+            rf"mov cr0, {reg}",
+            rf"mov cr2, {reg}",
+            rf"mov cr3, {reg}",
+            rf"mov cr4, {reg}",
+            rf"mov cr8, {reg}",   # x64 only, but pattern still safe for x86
+        ]
+        
+        results = []
+        for gadget in self._gadgets:
+            if any(re.search(p, gadget.raw, re.IGNORECASE) for p in patterns):
+                results.append(gadget)
+        
+        return results
 
     def find_nop(self, fake_arg=None) -> list:
         """Find NOP sequences for padding/alignment"""
