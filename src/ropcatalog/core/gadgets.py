@@ -3,6 +3,7 @@
 # Built-in imports
 import re
 from pathlib import Path
+import time
 from typing import Union, List
 
 def sort_key(gadget: 'Gadget') -> tuple:
@@ -253,12 +254,13 @@ class Gadgets:
         return list(seen.values())
 
     def _parse_file(self, file_path: str) -> list:
-        print(f"[*] Parsing {file_path.name}, looking for usable gadgets")
         gadget_pattern = re.compile(r"^(0x[0-9a-fA-F]+):\s*(.+?)\s*(?:\(\d+\sfound\))?$", re.MULTILINE)
 
+        start_time = time.time()
+        
         with open(file_path, mode="r", encoding="utf-8") as file_obj:
             file_content = file_obj.read()
-
+        
         bad_char_count = 0
         results = []
 
@@ -273,8 +275,10 @@ class Gadgets:
                 bad_char_count += 1
                 continue
             results.append(gadget)
-
-        print(f"\n[{file_path.stem}] Parsing completed")
+            
+        elapsed_time = time.time() - start_time
+        
+        print(f"\n[+] {file_path.stem} parsed in {elapsed_time:.2f}s")
         print(f"|-> Total gadgets extracted: {len(results)}")
         print(f"|-> Gadgets containing bad characters: {bad_char_count}")
         return results
