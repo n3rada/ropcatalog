@@ -327,7 +327,7 @@ class Terminal:
             r"\bsysexit\b",     # sysexit (return from sysenter)
         ]
     
-    return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
+        return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
     def copy_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modifcation of copied register allowed."""
