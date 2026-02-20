@@ -65,6 +65,8 @@ class Terminal:
             "pop": self.pop_to_register,
             "pivot": self.stack_pivot,
             "writebyte": self.write_byte,
+            "nop": self.find_nop,
+            "syscall": self.find_syscall,
         }
 
     def change_style(self, style_name: str = None) -> None:
@@ -196,6 +198,8 @@ class Terminal:
                 "jump": "Jump gadgets (e.g., jump esp)",
                 "call": "Indirect call gadgets (e.g., call rax)",
                 "transition": "Kernel->user transition (swapgs ; iretq)",
+                "syscall": "Syscall/sysenter gadgets",
+                "nop": "NOP sequences for padding/alignment",
             },
         }
         
@@ -263,6 +267,37 @@ class Terminal:
         ]
         
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
+
+    def find_nop(self, fake_arg=None) -> list:
+        """Find NOP sequences for padding/alignment"""
+        print("[*] Finding NOP sequences")
+        
+        # Match various NOP patterns:
+        # - nop ; ret
+        # - nop ; nop ; ret
+        # - Multi-byte NOPs (nop dword [rax], etc.)
+        patterns = [
+            r"\bnop\b.*ret",                    # Any NOP followed by ret
+            r"\bnop dword\b.*ret",              # Multi-byte NOP
+            r"\bnop word\b.*ret",               # Word-sized NOP
+        ]
+        
+        return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
+    
+    def find_syscall(self, fake_arg=None) -> list:
+        """Find syscall/sysenter gadgets for usermode transitions"""
+        print("[*] Finding syscall/sysenter gadgets")
+        
+        # Match syscall and sysenter instructions
+        # syscall is x64, sysenter is x86
+        patterns = [
+            r"\bsyscall\b",     # syscall ; ret (x64)
+            r"\bsysenter\b",    # sysenter ; ret (x86)
+            r"\bsysret\b",      # sysret (return from syscall)
+            r"\bsysexit\b",     # sysexit (return from sysenter)
+        ]
+    
+    return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
     def copy_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modifcation of copied register allowed."""
