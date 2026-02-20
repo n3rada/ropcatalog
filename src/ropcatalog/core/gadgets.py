@@ -221,7 +221,7 @@ class Gadgets:
         # preserve full list
         self._full_list = list(self._gadgets)  
 
-        print(f"[+] Total of {len(self)} gadgets loaded")
+        print(f"\n[+] Total of {len(self)} gadgets loaded")
 
     def __iter__(self):
         return iter(self._gadgets)
