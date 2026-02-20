@@ -64,6 +64,7 @@ class Terminal:
             "push": self.push_register,
             "pop": self.pop_to_register,
             "pivot": self.stack_pivot,
+            "writebyte": self.write_byte,
         }
 
     def change_style(self, style_name: str = None) -> None:
@@ -183,6 +184,7 @@ class Terminal:
                 "deref": "Alias for 'read'",
                 "writereg": "Write register to memory (e.g., writereg rcx finds mov [<any>], rcx)",
                 "writeptr": "Write to memory pointer (e.g., writeptr rax finds mov [rax], <any>)",
+                "writebyte": "Write byte to pointer (e.g., writebyte rax finds mov byte [rax], <any>)",
             },
             "Stack Operations": {
                 "push": "Push register to stack (e.g., push rax)",
@@ -392,6 +394,40 @@ class Terminal:
                                 if not clobbered:
                                     results.append(gadget)
                                     break
+        
+        return results
+
+    def write_byte(self, args: str = None) -> list:
+        """Write byte to memory pointer (e.g., writebyte rax finds mov byte [rax], <any>)"""
+        
+        if not args:
+            print("[!] Usage: writebyte <pointer_register>")
+            print("\tExample: writebyte rax  (finds mov byte [rax], cl)")
+            return []
+        
+        reg = args.strip()
+        print(f"[*] Finding gadgets that write a byte to [{reg}]")
+        
+        # Matches: mov byte [rax], cl / mov byte ptr [rax], 0x00 / mov byte [rax], al
+        pattern = rf"mov\s+byte\s+(?:ptr\s+)?\[{reg}\],\s*(\w+)"
+        
+        results = []
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match([pattern]):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    source = match.group(1)  # Could be register (cl) or immediate (0x00)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    # Ensure pointer register isn't clobbered
+                    if not gadget.is_register_modified(reg, remaining_instructions):
+                        results.append(gadget)
+                        break
         
         return results
  
