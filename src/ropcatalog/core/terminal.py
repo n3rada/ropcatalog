@@ -690,26 +690,86 @@ class Terminal:
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
     def increment_register(self, reg: str) -> list:
-        """Find gadgets that increment a register (e.g., inc eax)"""
+        """Find gadgets that increment a register (e.g., inc rax)"""
+        
         print(f"[*] Finding gadgets that increment {reg}")
+        
         patterns = [
             rf"add {reg}, 0x[0-9a-fA-F]+",
             rf"sub {reg}, -0x[0-9a-fA-F]+",
             rf"inc {reg}",
             rf"lea {reg}, \[{reg}\+0x[0-9a-fA-F]+\]",
         ]
-        return [g for g in self._gadgets if g.regex(patterns)]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            for pattern in patterns:
+                if matches := gadget.pattern_match([pattern]):
+                    for match in matches:
+                        matched_instruction = match.group(0)
+                        
+                        if matched_instruction not in gadget.instructions:
+                            continue
+                        
+                        matched_index = gadget.instructions.index(matched_instruction)
+                        
+                        # Instructions BEFORE the increment
+                        preceding_instructions = gadget.instructions[:matched_index]
+                        
+                        # Instructions AFTER the increment
+                        remaining_instructions = gadget.instructions[matched_index + 1:]
+                        
+                        # Check register NOT modified before OR after
+                        modified_before = gadget.is_register_modified(reg, preceding_instructions)
+                        modified_after = gadget.is_register_modified(reg, remaining_instructions)
+                        
+                        if not modified_before and not modified_after:
+                            results.append(gadget)
+                            break  # Don't add same gadget multiple times
+        
+        return results
 
     def decrement_register(self, reg: str) -> list:
-        """Find gadgets that decrement a register (e.g., dec eax)"""
+        """Find gadgets that decrement a register (e.g., dec rax)"""
+        
         print(f"[*] Finding gadgets that decrement {reg}")
+        
         patterns = [
             rf"sub {reg}, 0x[0-9a-fA-F]+",
             rf"add {reg}, -0x[0-9a-fA-F]+",
             rf"dec {reg}",
             rf"lea {reg}, \[{reg}\-0x[0-9a-fA-F]+\]",
         ]
-        return [g for g in self._gadgets if g.regex(patterns)]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            for pattern in patterns:
+                if matches := gadget.pattern_match([pattern]):
+                    for match in matches:
+                        matched_instruction = match.group(0)
+                        
+                        if matched_instruction not in gadget.instructions:
+                            continue
+                        
+                        matched_index = gadget.instructions.index(matched_instruction)
+                        
+                        # Instructions BEFORE the decrement
+                        preceding_instructions = gadget.instructions[:matched_index]
+                        
+                        # Instructions AFTER the decrement (excluding ret)
+                        remaining_instructions = gadget.instructions[matched_index + 1:]
+                        
+                        # Check register NOT modified before OR after
+                        modified_before = gadget.is_register_modified(reg, preceding_instructions)
+                        modified_after = gadget.is_register_modified(reg, remaining_instructions)
+                        
+                        if not modified_before and not modified_after:
+                            results.append(gadget)
+                            break
+        
+        return results
 
     def dereference_register(self, reg: str) -> list:
         """Read from memory (e.g., read rbx finds mov rax, [rbx])"""
