@@ -332,3 +332,7 @@ class Gadgets:
     @property
     def gadgets(self) -> list:
         return self._gadgets
+
+    @gadgets.setter
+    def gadgets(self, gadget_list: list):
+        self._gadgets = gadget_list
