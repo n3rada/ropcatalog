@@ -298,20 +298,31 @@ class Terminal:
         return results
 
     def find_nop(self, fake_arg=None) -> list:
-        """Find NOP sequences for padding/alignment"""
-        print("[*] Finding NOP sequences")
+        """Find TRUE NOP sequences (single-byte NOPs only, no stack manipulation)"""
+        print("[*] Finding true NOP sequences")
         
-        # Match various NOP patterns:
-        # - nop ; ret
-        # - nop ; nop ; ret
-        # - Multi-byte NOPs (nop dword [rax], etc.)
-        patterns = [
-            r"\bnop\b.*ret",                    # Any NOP followed by ret
-            r"\bnop dword\b.*ret",              # Multi-byte NOP
-            r"\bnop word\b.*ret",               # Word-sized NOP
-        ]
+        results = []
         
-        return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
+        for gadget in self._gadgets:
+            # Clean split
+            instructions = [i.strip() for i in gadget.raw.split(";") if i.strip()]
+            
+            # Must end with ret
+            if not instructions or instructions[-1].strip() != "ret":
+                continue
+            
+            # All instructions before ret must be simple "nop"
+            all_simple_nops = True
+            for instr in instructions[:-1]:
+                if instr.strip() != "nop":
+                    all_simple_nops = False
+                    break
+            
+            # Need at least one nop
+            if all_simple_nops and len(instructions) >= 2:
+                results.append(gadget)
+        
+        return results
     
     def find_syscall(self, fake_arg=None) -> list:
         """Find syscall/sysenter gadgets for usermode transitions"""
@@ -861,18 +872,40 @@ class Terminal:
 
     def zero(self, reg: str) -> list:
         """Find gadgets that zero the given register"""
-
-        print(f"[*] Find gadgets that zero {reg}")
-
+    
+        print(f"[*] Finding gadgets that zero {reg}")
+    
         patterns = [
             rf"xor {reg}, {reg}",
             rf"sub {reg}, {reg}",
-            rf"lea [{reg}], 0 ;",
-            rf"mov {reg}, 0 ;",
-            rf"and {reg}, 0 ;",
+            rf"mov {reg}, 0x0+\b",  # mov rax, 0
+            rf"and {reg}, 0x0+\b",  # and rax, 0
         ]
-
-        return [g for g in self._gadgets if g.regex(patterns)]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            for pattern in patterns:
+                if matches := gadget.pattern_match([pattern]):
+                    for match in matches:
+                        matched_instruction = match.group(0)
+                        
+                        if matched_instruction not in gadget.instructions:
+                            continue
+                        
+                        matched_index = gadget.instructions.index(matched_instruction)
+                        
+                        preceding_instructions = gadget.instructions[:matched_index]
+                        remaining_instructions = gadget.instructions[matched_index + 1:]
+                        
+                        modified_before = gadget.is_register_modified(reg, preceding_instructions)
+                        modified_after = gadget.is_register_modified(reg, remaining_instructions)
+                        
+                        if not modified_before and not modified_after:
+                            results.append(gadget)
+                            break
+        
+        return results
 
     def write_register_to_memory(self, reg: str = None) -> list:
         """Write register to memory (e.g., write rcx finds mov [<any>], rcx)"""
