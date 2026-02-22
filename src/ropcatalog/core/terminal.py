@@ -68,6 +68,8 @@ class Terminal:
             "nop": self.find_nop,
             "syscall": self.find_syscall,
             "loadcr": self.load_cr,
+            "add": "Add register to register (e.g., add rax rsi)",
+            "sub": "Subtract register from register (e.g., sub rcx rdx)",
         }
 
     def change_style(self, style_name: str = None) -> None:
