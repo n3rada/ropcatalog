@@ -39,10 +39,40 @@ def is_register(operand: str, arch: str = 'x86') -> bool:
 
 
 class Gadget:
-    BAD_OPS = {
+     BAD_OPS = {
+        # Control flow (breaks ROP chain)
         "int3", "call", "leave", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
-        "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe"
+        "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe",
+        
+        # System control (dangerous/useless)
+        "hlt",       # Halts CPU
+        "cli",       # Clear interrupts (with hlt = permanent freeze)
+        "into",      # Interrupt on overflow
+        
+        # I/O operations (useless in ROP)
+        "in",        # Read from I/O port
+        "out",       # Write to I/O port
+        "ins",       # Input string from port
+        "outs",      # Output string to port
+        "insb",      # Input byte from port
+        "insw",      # Input word from port
+        "insd",      # Input dword from port
+        "outsb",     # Output byte to port
+        "outsw",     # Output word to port
+        "outsd",     # Output dword to port
+        
+        # Undefined/trap instructions
+        "ud2",       # Undefined instruction (crashes)
+         
+        # VM instructions (context-specific)
+        "vmcall",    # VM call
+        "vmlaunch",  # VM launch
+        "vmresume",  # VM resume
+        "vmxoff",    # Turn off VMX
+        "vmxon",     # Turn on VMX
+        "vmfunc",    # VM function
     }
+
 
     MAX_RETN = 0x28  # 10 DWORDs = 40 bytes
 
