@@ -280,7 +280,7 @@ class Terminal:
             print("[!] Usage: offset [on|off]")
             print("\tNo argument toggles current state")
 
-      def add_to_register(self, args: str = None) -> list:
+    def add_to_register(self, args: str = None) -> list:
         """Add register to another register (e.g., add rax rsi OR add rax for any)"""
         
         if not args:
