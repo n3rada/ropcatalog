@@ -223,9 +223,18 @@ class Terminal:
             for cmd, desc in commands.items():
                 print(f"  {cmd:<10} {desc}")
         
+        
         print("\n" + "="*70)
         print("Modifiers:")
-        print("  /n         Disable bad operation filtering (e.g., jump esp /n)")
+        print("  /n           Disable bad operation filtering (show all gadgets)")
+        print("               Example: copyto rax /n")
+        print()
+        print("  /v           Filter for volatile registers only (caller-saved)")
+        print("               Volatile (x64): RAX, RCX, RDX, R8, R9, R10, R11")
+        print("               Non-volatile (x64): RBX, RBP, RSI, RDI, R12-R15")
+        print("               Example: copy rax /v  (only gadgets using volatile regs)")
+        print()
+        print("  Combined:    copy rax /v /n  (volatile only, including bad ops)")
         print("="*70 + "\n")
 
     def exit_command(self, fake_arg=None) -> bool:
