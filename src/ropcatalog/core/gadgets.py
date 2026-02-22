@@ -73,7 +73,34 @@ class Gadget:
         self._raw = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
         self._instructions = Gadget.instruction_string_to_list(instruction_string=self._raw)
 
+    
+    def uses_only_volatile_regs(self) -> bool:
+        """Check if gadget only modifies volatile (caller-saved) registers"""
         
+        # Non-volatile (callee-saved) registers
+        nonvolatile_x86 = {"ebx", "ebp", "esi", "edi", "esp", "bx", "bp", "si", "di", "sp"}
+        nonvolatile_x64 = {"rbx", "rbp", "rsi", "rdi", "rsp", "r12", "r13", "r14", "r15",
+                           "ebx", "ebp", "esi", "edi", "esp", "r12d", "r13d", "r14d", "r15d",
+                           "bx", "bp", "si", "di", "sp", "r12w", "r13w", "r14w", "r15w",
+                           "bl", "bh", "bpl", "sil", "dil", "spl", "r12b", "r13b", "r14b", "r15b"}
+        
+        nonvolatile = nonvolatile_x64 if self._arch == 'x64' else nonvolatile_x86
+        
+        # Check each instruction (except ret)
+        for instr in self._instructions[:-1]:  # Exclude 'ret'
+            if "," in instr:
+                # Check destination register
+                dest = instr.split(",")[0].strip().split()[-1]  # Get last word before comma
+                if dest.lower() in nonvolatile:
+                    return False
+            elif instr.startswith("pop "):
+                # Check what's being popped
+                reg = instr.split()[1].strip()
+                if reg.lower() in nonvolatile:
+                    return False
+        
+        return True
+
     def is_register_modified(self, reg: str, instructions: list) -> bool:
         """
         Checks if a register or its sub-registers are modified in the given instructions.
