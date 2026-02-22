@@ -142,7 +142,7 @@ class Terminal:
     
         # Restore clean catalog
         if use_full_catalog:
-            self._gadgets._gadgets = original_gadgets
+            self._gadgets.gadgets = original_gadgets
     
         # Exit handling
         if cmd == "exit" and results is True:
