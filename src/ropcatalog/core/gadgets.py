@@ -234,35 +234,35 @@ class Gadget:
 
 class Gadgets:
     def __init__(self, file_paths: List[str], bad_chars: list = None, arch: str = 'x86'):
-        self._gadgets = []
         self._bad_characters = bad_chars
         self._arch = arch.lower()
         self._unique_mode = False
 
-        # Parse all files
+        all_gadgets = []
         for file_path in file_paths:
             path = Path(file_path).resolve()
             if not path.is_file():
                 print(f"[!] File {file_path} does not exist.")
                 continue
-            self._gadgets.extend(self._parse_file(path))
+            all_gadgets.extend(self._parse_file(path))
 
-        # Store full list (including bad gadgets)
-        self._full_list = list(self._gadgets)
+        # Store full list (all gadgets including bad ones)
+        self._full_list = list(all_gadgets)
         
-        # Filter out bad gadgets by default
-        bad_gadget_count = 0
+        # Filter bad gadgets
+        bad_count = 0
         clean_gadgets = []
-        for gadget in self._gadgets:
+        for gadget in all_gadgets:
             if gadget.has_bad_op():
-                bad_gadget_count += 1
+                bad_count += 1
             else:
                 clean_gadgets.append(gadget)
         
-        self._gadgets = clean_gadgets
+        # Active list is what's used by iteration
+        self._active_list = clean_gadgets
         
         print(f"\n[+] Total gadgets loaded: {len(self._full_list)}")
-        print(f"|-> Clean gadgets (filtered): {len(self._gadgets)}")
+        print(f"|-> Clean gadgets (filtered): {len(self._active_list)}")
         print(f"|-> Bad gadgets (removed): {bad_gadget_count}")
 
     def use_full_catalog(self, enabled: bool):
@@ -285,17 +285,17 @@ class Gadgets:
 
     def add_gadget(self, gadget: Gadget) -> None:
         if isinstance(gadget, Gadget):
-            self._gadgets.append(gadget)
+            self._active_list.append(gadget)
         else:
             raise TypeError("Only Gadget objects can be added.")
 
     def set_uniqueness(self, enabled: bool):
         self._unique_mode = enabled
         if enabled:
-            self._gadgets = self._filter_unique(self._full_list)
+            self._active_list = self._filter_unique(self._full_list)
         else:
-            self._gadgets = list(self._full_list)
-        print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._gadgets)} gadgets)")
+            self._active_list = list(self._full_list)
+        print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._active_list)} gadgets)")
 
     def _filter_unique(self, gadgets_list):
         """Filter for unique gadgets per module (same instruction, different addresses within same module)"""
@@ -338,9 +338,9 @@ class Gadgets:
         return results
 
     def to_dict(self) -> dict:
-        return {g.address: g.raw for g in self._gadgets}
+        return {g.address: g.raw for g in self._active_list}
 
     @property
     def gadgets(self) -> list:
-        return self._gadgets
+        return self._active_list
 
