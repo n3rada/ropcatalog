@@ -117,37 +117,36 @@ class Terminal:
             print("\tNo argument toggles current state")
 
     def execute(self, command_input: str) -> list:
-        """
-        Executes the command based on the input.
-        """
         command_parts = command_input.split(maxsplit=1)
         cmd = command_parts[0].lower()
         args = command_parts[1].strip().lower() if len(command_parts) > 1 else None
-
-        results = []
-
-        if not cmd in self._commands:
-            print(
-                f"[!] Unrecognized command '{cmd}'. Type 'help' for available commands."
-            )
+    
+        if cmd not in self._commands:
+            print(f"[!] Unrecognized command '{cmd}'. Type 'help' for available commands.")
             return []
-
-        filtering = True
-
+    
+        # Check for /n flag to disable filtering
+        use_full_catalog = False
         if args is not None and args.endswith(" /n"):
             args = args.replace(" /n", "")
-            print("[i] Filtering disabled")
-            filtering = False
-
+            print("[i] Using full catalog (including bad gadgets)")
+            use_full_catalog = True
+    
+        # Temporarily swap catalog if /n flag used
+        if use_full_catalog:
+            original_gadgets = self._gadgets._gadgets
+            self._gadgets._gadgets = self._gadgets._full_list
+    
         results = self._commands[cmd](args) or []
-
-        # Check if exit command was called
+    
+        # Restore original catalog
+        if use_full_catalog:
+            self._gadgets._gadgets = original_gadgets
+    
+        # Exit command handling
         if cmd == "exit" and results is True:
             raise SystemExit(0)
-
-        if filtering and isinstance(results, list):
-            results = [gadget for gadget in results if not gadget.has_bad_op()]
-
+    
         return results if isinstance(results, list) else []
 
     # Command methods
