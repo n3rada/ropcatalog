@@ -280,46 +280,52 @@ class Terminal:
             print("[!] Usage: offset [on|off]")
             print("\tNo argument toggles current state")
 
-    def add_to_register(self, args: str = None) -> list:
-        """Add register to another register (e.g., add rax rsi finds add rax, rsi)"""
+      def add_to_register(self, args: str = None) -> list:
+        """Add register to another register (e.g., add rax rsi OR add rax for any)"""
         
         if not args:
-            print("[!] Usage: add <dest_register> <source_register>")
+            print("[!] Usage: add <dest_register> [source_register]")
             print("\tExample: add rax rsi  (finds add rax, rsi)")
+            print("\tExample: add rax      (finds add rax, <any_register>)")
             print("\tNote: For immediates, use 'inc' command")
             return []
         
         parts = args.split()
-        
-        if len(parts) < 2:
-            print("[!] Usage: add <dest_register> <source_register>")
-            print("\tExample: add rax rsi")
-            return []
-        
         dest_reg = parts[0].strip()
-        source_reg = parts[1].strip()
+        source_reg = parts[1].strip() if len(parts) > 1 else None
         
-        # Validate source is a register, not an immediate
-        if source_reg.startswith("0x") or source_reg.isdigit():
-            print(f"[!] Source '{source_reg}' is an immediate value")
-            print("[i] Use 'inc' for adding immediates (e.g., inc rax)")
-            return []
-        
-        print(f"[*] Finding gadgets that add {source_reg} to {dest_reg}")
-        
-        patterns = [
-            rf"add {dest_reg}, {source_reg}",
-        ]
+        if source_reg:
+            # Validate source is a register, not an immediate
+            if source_reg.startswith("0x") or source_reg.isdigit():
+                print(f"[!] Source '{source_reg}' is an immediate value")
+                print("[i] Use 'inc' for adding immediates (e.g., inc rax)")
+                return []
+            
+            # Specific source register
+            print(f"[*] Finding gadgets that add {source_reg} to {dest_reg}")
+            pattern = rf"add {dest_reg}, {source_reg}"
+        else:
+            # Any register source (not immediates)
+            print(f"[*] Finding gadgets that add any register to {dest_reg}")
+            # Match: add rax, <register> but NOT add rax, 0x...
+            pattern = rf"add {dest_reg}, (\w+)"
         
         results = []
         
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match(patterns):
+            if matches := gadget.pattern_match([pattern]):
                 for match in matches:
                     matched_instruction = match.group(0)
                     
                     if matched_instruction not in gadget.instructions:
                         continue
+                    
+                    # If no specific source, validate it's a register (not immediate)
+                    if not source_reg and len(match.groups()) > 0:
+                        candidate_source = match.group(1)
+                        # Skip if it's an immediate value
+                        if candidate_source.startswith("0x") or candidate_source.isdigit():
+                            continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
@@ -334,47 +340,53 @@ class Terminal:
                         break
         
         return results
-        
+    
     def sub_from_register(self, args: str = None) -> list:
-        """Subtract register from another register (e.g., sub rax rsi finds sub rax, rsi)"""
+        """Subtract register from another register (e.g., sub rax rsi OR sub rax for any)"""
         
         if not args:
-            print("[!] Usage: sub <dest_register> <source_register>")
+            print("[!] Usage: sub <dest_register> [source_register]")
             print("\tExample: sub rax rsi  (finds sub rax, rsi)")
+            print("\tExample: sub rax      (finds sub rax, <any_register>)")
             print("\tNote: For immediates, use 'dec' command")
             return []
         
         parts = args.split()
-        
-        if len(parts) < 2:
-            print("[!] Usage: sub <dest_register> <source_register>")
-            print("\tExample: sub rax rsi")
-            return [] 
-        
         dest_reg = parts[0].strip()
-        source_reg = parts[1].strip()
+        source_reg = parts[1].strip() if len(parts) > 1 else None
         
-        # Validate source is a register, not an immediate
-        if source_reg.startswith("0x") or source_reg.isdigit():
-            print(f"[!] Source '{source_reg}' is an immediate value")
-            print("[i] Use 'dec' for subtracting immediates (e.g., dec rax)")
-            return []
-        
-        print(f"[*] Finding gadgets that subtract {source_reg} from {dest_reg}")
-        
-        patterns = [
-            rf"sub {dest_reg}, {source_reg}",
-        ]
+        if source_reg:
+            # Validate source is a register, not an immediate
+            if source_reg.startswith("0x") or source_reg.isdigit():
+                print(f"[!] Source '{source_reg}' is an immediate value")
+                print("[i] Use 'dec' for subtracting immediates (e.g., dec rax)")
+                return []
+            
+            # Specific source register
+            print(f"[*] Finding gadgets that subtract {source_reg} from {dest_reg}")
+            pattern = rf"sub {dest_reg}, {source_reg}"
+        else:
+            # Any register source (not immediates)
+            print(f"[*] Finding gadgets that subtract any register from {dest_reg}")
+            # Match: sub rax, <register> but NOT sub rax, 0x...
+            pattern = rf"sub {dest_reg}, (\w+)"
         
         results = []
         
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match(patterns):
+            if matches := gadget.pattern_match([pattern]):
                 for match in matches:
                     matched_instruction = match.group(0)
                     
                     if matched_instruction not in gadget.instructions:
                         continue
+                    
+                    # If no specific source, validate it's a register (not immediate)
+                    if not source_reg and len(match.groups()) > 0:
+                        candidate_source = match.group(1)
+                        # Skip if it's an immediate value
+                        if candidate_source.startswith("0x") or candidate_source.isdigit():
+                            continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
@@ -388,7 +400,7 @@ class Terminal:
                         results.append(gadget)
                         break
         
-        return results 
+        return results
         
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
