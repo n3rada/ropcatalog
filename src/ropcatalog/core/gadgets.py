@@ -236,11 +236,11 @@ class Gadget:
 class Gadgets:
     def __init__(self, file_paths: List[str], bad_chars: list = None, arch: str = 'x86'):
         self._gadgets = []
-
         self._bad_characters = bad_chars
         self._arch = arch.lower()
         self._unique_mode = False
 
+        # Parse all files
         for file_path in file_paths:
             path = Path(file_path).resolve()
             if not path.is_file():
@@ -248,10 +248,23 @@ class Gadgets:
                 continue
             self._gadgets.extend(self._parse_file(path))
 
-        # preserve full list
-        self._full_list = list(self._gadgets)  
-
-        print(f"\n[+] Total of {len(self)} gadgets loaded")
+        # Store full list (including bad gadgets)
+        self._full_list = list(self._gadgets)
+        
+        # Filter out bad gadgets by default
+        bad_gadget_count = 0
+        clean_gadgets = []
+        for gadget in self._gadgets:
+            if gadget.has_bad_op():
+                bad_gadget_count += 1
+            else:
+                clean_gadgets.append(gadget)
+        
+        self._gadgets = clean_gadgets
+        
+        print(f"\n[+] Total gadgets loaded: {len(self._full_list)}")
+        print(f"|-> Clean gadgets (filtered): {len(self._gadgets)}")
+        print(f"|-> Bad gadgets (removed): {bad_gadget_count}")
 
     def __iter__(self):
         return iter(self._gadgets)
