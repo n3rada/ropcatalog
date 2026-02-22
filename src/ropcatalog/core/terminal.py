@@ -308,7 +308,7 @@ class Terminal:
         print(f"[*] Finding gadgets that add {source_reg} to {dest_reg}")
         
         patterns = [
-            rf"add {dest_reg}, {source_reg}",  # add rax, rsi
+            rf"add {dest_reg}, {source_reg}",
         ]
         
         results = []
@@ -334,7 +334,7 @@ class Terminal:
                         break
         
         return results
-    
+        
     def sub_from_register(self, args: str = None) -> list:
         """Subtract register from another register (e.g., sub rax rsi finds sub rax, rsi)"""
         
@@ -349,7 +349,7 @@ class Terminal:
         if len(parts) < 2:
             print("[!] Usage: sub <dest_register> <source_register>")
             print("\tExample: sub rax rsi")
-            return []
+            return [] 
         
         dest_reg = parts[0].strip()
         source_reg = parts[1].strip()
@@ -363,7 +363,7 @@ class Terminal:
         print(f"[*] Finding gadgets that subtract {source_reg} from {dest_reg}")
         
         patterns = [
-            rf"sub {dest_reg}, {source_reg}",  # sub rax, rsi
+            rf"sub {dest_reg}, {source_reg}",
         ]
         
         results = []
@@ -388,8 +388,8 @@ class Terminal:
                         results.append(gadget)
                         break
         
-        return results
-    
+        return results 
+        
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
