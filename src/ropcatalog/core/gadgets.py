@@ -39,41 +39,28 @@ def is_register(operand: str, arch: str = 'x86') -> bool:
 
 
 class Gadget:
-     BAD_OPS = {
-        # Control flow (breaks ROP chain)
-        "int3", "call", "leave", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
+    BAD_OPS = {
+        # Control flow
+        "int3", "leave", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
         "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe",
         
-        # System control (dangerous/useless)
-        "hlt",       # Halts CPU
-        "cli",       # Clear interrupts (with hlt = permanent freeze)
-        "into",      # Interrupt on overflow
+        # System control
+        "hlt", "cli", "int ", "into",
         
-        # I/O operations (useless in ROP)
-        "in",        # Read from I/O port
-        "out",       # Write to I/O port
-        "ins",       # Input string from port
-        "outs",      # Output string to port
-        "insb",      # Input byte from port
-        "insw",      # Input word from port
-        "insd",      # Input dword from port
-        "outsb",     # Output byte to port
-        "outsw",     # Output word to port
-        "outsd",     # Output dword to port
+        # I/O operations
+        "in ", "out ", "ins", "outs",
         
-        # Undefined/trap instructions
-        "ud2",       # Undefined instruction (crashes)
-         
-        # VM instructions (context-specific)
-        "vmcall",    # VM call
-        "vmlaunch",  # VM launch
-        "vmresume",  # VM resume
-        "vmxoff",    # Turn off VMX
-        "vmxon",     # Turn on VMX
-        "vmfunc",    # VM function
+        # Undefined/trap
+        "ud2", "int1",
+        
+        # VM instructions
+        "vmcall", "vmlaunch", "vmresume", "vmxoff", "vmxon", "vmfunc",
+        
+        # Repeat prefixes
+        "rep ", "repe ", "repz ", "repne ", "repnz ",
     }
-    
-    MAX_RETN = 0x28  # 10 DWORDs = 40 bytes
+
+    MAX_RETN = 0x28  # 40 bytes (5 QWORDs on x64)
 
     @staticmethod
     def instruction_string_to_list(instruction_string: str) -> list:
@@ -143,11 +130,38 @@ class Gadget:
         return False
 
     def has_bad_op(self) -> bool:
-        return any(bad_op in self._raw for bad_op in self.BAD_OPS)
+        """Check if gadget contains bad operations"""
+        
+        # Check standard bad ops (without "call")
+        for bad_op in self.BAD_OPS:
+            if bad_op in self._raw:
+                return True
+        
+        # Special handling for "call"
+        if re.search(r"\bcall\b", self._raw, re.IGNORECASE):
+            # Allow indirect calls to controlled registers
+            controlled_calls = [
+                r"\bcall\s+(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)\b",  # call rax
+                r"\bcall\s+\[(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)",  # call [rax]
+                r"\bcall\s+qword\s+ptr\s+\[(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)",  # call qword ptr [rax]
+            ]
+            
+            # If it's a controlled indirect call, allow it
+            if any(re.search(pattern, self._raw, re.IGNORECASE) for pattern in controlled_calls):
+                return False  # Not a bad op
 
-    def has_big_retn(self) -> bool:
+            return True   # Direct call or uncontrolled - bad op
+        
+        # Check for large retn values
         if match := re.search(r"retn 0x([0-9a-fA-F]+)", self._raw):
-            return int(match.group(1), 16) > self.MAX_RETN
+            if int(match.group(1), 16) > self.MAX_RETN:
+                return True
+        
+        # Special case: iretq is only useful with swapgs
+        if re.search(r"\biretq?\b", self._raw, re.IGNORECASE):
+            if not re.search(r"swapgs\s*;\s*iretq?", self._raw, re.IGNORECASE):
+                return True
+        
         return False
 
     def has_bad_chars_in_address(self, bad_chars: list) -> bool:
