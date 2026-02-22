@@ -134,15 +134,14 @@ class Terminal:
     
         # Temporarily swap to full catalog if /n flag present
         if use_full_catalog:
-            original_gadgets = self._gadgets.gadgets  # Save current (clean) gadgets
-            self._gadgets.gadgets = self._gadgets.full_list  # Swap to full list
-        
+            self._gadgets.use_full_catalog(True)
+    
         # Execute the command
         results = self._commands[cmd](args) or []
     
         # Restore clean catalog
         if use_full_catalog:
-            self._gadgets.gadgets = original_gadgets
+            self._gadgets.use_full_catalog(False)
     
         # Exit handling
         if cmd == "exit" and results is True:
