@@ -284,59 +284,74 @@ class Terminal:
         """Add register to another register (e.g., add rax rsi OR add rax for any)"""
         
         if not args:
-            print("[!] Usage: add <dest_register> [source_register]")
-            print("\tExample: add rax rsi  (finds add rax, rsi)")
-            print("\tExample: add rax      (finds add rax, <any_register>)")
+            print("[!] Usage: add <register> [other_register]")
+            print("\tExample: add rax rsi  (finds add rax, rsi AND add rsi, rax)")
+            print("\tExample: add rax      (finds any add with rax)")
             print("\tNote: For immediates, use 'inc' command")
             return []
         
         parts = args.split()
-        dest_reg = parts[0].strip()
-        source_reg = parts[1].strip() if len(parts) > 1 else None
+        reg = parts[0].strip()
+        other_reg = parts[1].strip() if len(parts) > 1 else None
         
-        if source_reg:
-            # Validate source is a register, not an immediate
-            if source_reg.startswith("0x") or source_reg.isdigit():
-                print(f"[!] Source '{source_reg}' is an immediate value")
+        if other_reg:
+            # Validate other is a register, not an immediate
+            if other_reg.startswith("0x") or other_reg.isdigit():
+                print(f"[!] Source '{other_reg}' is an immediate value")
                 print("[i] Use 'inc' for adding immediates (e.g., inc rax)")
                 return []
             
-            # Specific source register
-            print(f"[*] Finding gadgets that add {source_reg} to {dest_reg}")
-            pattern = rf"add {dest_reg}, {source_reg}"
+            # Find both directions: add rax, rsi AND add rsi, rax
+            print(f"[*] Finding gadgets that add {reg} and {other_reg}")
+            patterns = [
+                rf"add {reg}, {other_reg}",      # add rax, rsi
+                rf"add {other_reg}, {reg}",      # add rsi, rax
+            ]
         else:
-            # Any register source (not immediates)
-            print(f"[*] Finding gadgets that add any register to {dest_reg}")
-            # Match: add rax, <register> but NOT add rax, 0x...
-            pattern = rf"add {dest_reg}, (\w+)"
+            # Any register with reg (either as dest or source)
+            print(f"[*] Finding gadgets that add any register with {reg}")
+            patterns = [
+                rf"add {reg}, (\w+)",      # add rax, <any>
+                rf"add (\w+), {reg}",      # add <any>, rax
+            ]
         
         results = []
+        seen = set()  # Avoid duplicates
         
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match([pattern]):
+            if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     
                     if matched_instruction not in gadget.instructions:
                         continue
                     
-                    # If no specific source, validate it's a register (not immediate)
-                    if not source_reg and len(match.groups()) > 0:
-                        candidate_source = match.group(1)
+                    # Avoid duplicates
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    # If no specific other_reg, validate it's a register (not immediate)
+                    if not other_reg and len(match.groups()) > 0:
+                        candidate = match.group(1)
                         # Skip if it's an immediate value
-                        if candidate_source.startswith("0x") or candidate_source.isdigit():
+                        if candidate.startswith("0x") or candidate.isdigit():
                             continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
+                    # Extract which register is being modified
+                    dest_register = matched_instruction.split(',')[0].split()[-1].strip()
+                    
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
                     
-                    modified_before = gadget.is_register_modified(dest_reg, preceding_instructions)
-                    modified_after = gadget.is_register_modified(dest_reg, remaining_instructions)
+                    modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
+                    modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
                     
                     if not modified_before and not modified_after:
                         results.append(gadget)
+                        seen.add(gadget_key)
                         break
         
         return results
@@ -345,59 +360,74 @@ class Terminal:
         """Subtract register from another register (e.g., sub rax rsi OR sub rax for any)"""
         
         if not args:
-            print("[!] Usage: sub <dest_register> [source_register]")
-            print("\tExample: sub rax rsi  (finds sub rax, rsi)")
-            print("\tExample: sub rax      (finds sub rax, <any_register>)")
+            print("[!] Usage: sub <register> [other_register]")
+            print("\tExample: sub rax rsi  (finds sub rax, rsi AND sub rsi, rax)")
+            print("\tExample: sub rax      (finds any sub with rax)")
             print("\tNote: For immediates, use 'dec' command")
             return []
         
         parts = args.split()
-        dest_reg = parts[0].strip()
-        source_reg = parts[1].strip() if len(parts) > 1 else None
+        reg = parts[0].strip()
+        other_reg = parts[1].strip() if len(parts) > 1 else None
         
-        if source_reg:
-            # Validate source is a register, not an immediate
-            if source_reg.startswith("0x") or source_reg.isdigit():
-                print(f"[!] Source '{source_reg}' is an immediate value")
+        if other_reg:
+            # Validate other is a register, not an immediate
+            if other_reg.startswith("0x") or other_reg.isdigit():
+                print(f"[!] Source '{other_reg}' is an immediate value")
                 print("[i] Use 'dec' for subtracting immediates (e.g., dec rax)")
                 return []
             
-            # Specific source register
-            print(f"[*] Finding gadgets that subtract {source_reg} from {dest_reg}")
-            pattern = rf"sub {dest_reg}, {source_reg}"
+            # Find both directions: sub rax, rsi AND sub rsi, rax
+            print(f"[*] Finding gadgets that subtract {reg} and {other_reg}")
+            patterns = [
+                rf"sub {reg}, {other_reg}",      # sub rax, rsi
+                rf"sub {other_reg}, {reg}",      # sub rsi, rax
+            ]
         else:
-            # Any register source (not immediates)
-            print(f"[*] Finding gadgets that subtract any register from {dest_reg}")
-            # Match: sub rax, <register> but NOT sub rax, 0x...
-            pattern = rf"sub {dest_reg}, (\w+)"
+            # Any register with reg (either as dest or source)
+            print(f"[*] Finding gadgets that subtract any register with {reg}")
+            patterns = [
+                rf"sub {reg}, (\w+)",      # sub rax, <any>
+                rf"sub (\w+), {reg}",      # sub <any>, rax
+            ]
         
         results = []
+        seen = set()  # Avoid duplicates
         
         for gadget in self._gadgets:
-            if matches := gadget.pattern_match([pattern]):
+            if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     
                     if matched_instruction not in gadget.instructions:
                         continue
                     
-                    # If no specific source, validate it's a register (not immediate)
-                    if not source_reg and len(match.groups()) > 0:
-                        candidate_source = match.group(1)
+                    # Avoid duplicates
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    # If no specific other_reg, validate it's a register (not immediate)
+                    if not other_reg and len(match.groups()) > 0:
+                        candidate = match.group(1)
                         # Skip if it's an immediate value
-                        if candidate_source.startswith("0x") or candidate_source.isdigit():
+                        if candidate.startswith("0x") or candidate.isdigit():
                             continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
+                    # Extract which register is being modified
+                    dest_register = matched_instruction.split(',')[0].split()[-1].strip()
+                    
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
                     
-                    modified_before = gadget.is_register_modified(dest_reg, preceding_instructions)
-                    modified_after = gadget.is_register_modified(dest_reg, remaining_instructions)
+                    modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
+                    modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
                     
                     if not modified_before and not modified_after:
                         results.append(gadget)
+                        seen.add(gadget_key)
                         break
         
         return results
