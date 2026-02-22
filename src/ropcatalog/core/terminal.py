@@ -125,19 +125,30 @@ class Terminal:
             print(f"[!] Unrecognized command '{cmd}'. Type 'help' for available commands.")
             return []
     
-        # Check for /n flag to use full catalog (including bad gadgets)
+        # Check for /n flag (disable bad op filtering)
         use_full_catalog = False
         if args is not None and args.endswith(" /n"):
             args = args.replace(" /n", "")
             print("[i] Using full catalog (including bad gadgets)")
             use_full_catalog = True
     
+        # Check for /v flag (volatile registers only)
+        volatile_only = False
+        if args is not None and args.endswith(" /v"):
+            args = args.replace(" /v", "")
+            print("[i] Filtering for volatile registers only (caller-saved)")
+            volatile_only = True
+    
         # Temporarily swap to full catalog if /n flag present
         if use_full_catalog:
             self._gadgets.use_full_catalog(True)
-    
+        
         # Execute the command
         results = self._commands[cmd](args) or []
+    
+        # Filter for volatile registers if /v flag
+        if volatile_only and isinstance(results, list):
+            results = [g for g in results if g.uses_only_volatile_regs()]
     
         # Restore clean catalog
         if use_full_catalog:
@@ -180,6 +191,8 @@ class Terminal:
                 "zero": "Zero a register (e.g., zero rax)",
                 "inc": "Increment register (e.g., inc eax)",
                 "dec": "Decrement register (e.g., dec edx)",
+                "add": "Add register-to-register",
+                "sub": "Subtract from register",
             },
             "Memory Operations": {
                 "read": "Read from memory (e.g., read rbx finds mov rax, [rbx])",
@@ -256,6 +269,115 @@ class Terminal:
             print("[!] Usage: offset [on|off]")
             print("\tNo argument toggles current state")
 
+    def add_to_register(self, args: str = None) -> list:
+        """Add register to another register (e.g., add rax rsi finds add rax, rsi)"""
+        
+        if not args:
+            print("[!] Usage: add <dest_register> <source_register>")
+            print("\tExample: add rax rsi  (finds add rax, rsi)")
+            print("\tNote: For immediates, use 'inc' command")
+            return []
+        
+        parts = args.split()
+        
+        if len(parts) < 2:
+            print("[!] Usage: add <dest_register> <source_register>")
+            print("\tExample: add rax rsi")
+            return []
+        
+        dest_reg = parts[0].strip()
+        source_reg = parts[1].strip()
+        
+        # Validate source is a register, not an immediate
+        if source_reg.startswith("0x") or source_reg.isdigit():
+            print(f"[!] Source '{source_reg}' is an immediate value")
+            print("[i] Use 'inc' for adding immediates (e.g., inc rax)")
+            return []
+        
+        print(f"[*] Finding gadgets that add {source_reg} to {dest_reg}")
+        
+        patterns = [
+            rf"add {dest_reg}, {source_reg}",  # add rax, rsi
+        ]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    modified_before = gadget.is_register_modified(dest_reg, preceding_instructions)
+                    modified_after = gadget.is_register_modified(dest_reg, remaining_instructions)
+                    
+                    if not modified_before and not modified_after:
+                        results.append(gadget)
+                        break
+        
+        return results
+    
+    def sub_from_register(self, args: str = None) -> list:
+        """Subtract register from another register (e.g., sub rax rsi finds sub rax, rsi)"""
+        
+        if not args:
+            print("[!] Usage: sub <dest_register> <source_register>")
+            print("\tExample: sub rax rsi  (finds sub rax, rsi)")
+            print("\tNote: For immediates, use 'dec' command")
+            return []
+        
+        parts = args.split()
+        
+        if len(parts) < 2:
+            print("[!] Usage: sub <dest_register> <source_register>")
+            print("\tExample: sub rax rsi")
+            return []
+        
+        dest_reg = parts[0].strip()
+        source_reg = parts[1].strip()
+        
+        # Validate source is a register, not an immediate
+        if source_reg.startswith("0x") or source_reg.isdigit():
+            print(f"[!] Source '{source_reg}' is an immediate value")
+            print("[i] Use 'dec' for subtracting immediates (e.g., dec rax)")
+            return []
+        
+        print(f"[*] Finding gadgets that subtract {source_reg} from {dest_reg}")
+        
+        patterns = [
+            rf"sub {dest_reg}, {source_reg}",  # sub rax, rsi
+        ]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    modified_before = gadget.is_register_modified(dest_reg, preceding_instructions)
+                    modified_after = gadget.is_register_modified(dest_reg, remaining_instructions)
+                    
+                    if not modified_before and not modified_after:
+                        results.append(gadget)
+                        break
+        
+        return results
     
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
