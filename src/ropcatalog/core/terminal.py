@@ -125,25 +125,26 @@ class Terminal:
             print(f"[!] Unrecognized command '{cmd}'. Type 'help' for available commands.")
             return []
     
-        # Check for /n flag to disable filtering
+        # Check for /n flag to use full catalog (including bad gadgets)
         use_full_catalog = False
         if args is not None and args.endswith(" /n"):
             args = args.replace(" /n", "")
             print("[i] Using full catalog (including bad gadgets)")
             use_full_catalog = True
     
-        # Temporarily swap catalog if /n flag used
+        # Temporarily swap to full catalog if /n flag present
         if use_full_catalog:
-            original_gadgets = self._gadgets._gadgets
-            self._gadgets._gadgets = self._gadgets._full_list
-    
+            original_gadgets = self._gadgets.gadgets  # Save current (clean) gadgets
+            self._gadgets.gadgets = self._gadgets.full_list  # Swap to full list
+        
+        # Execute the command
         results = self._commands[cmd](args) or []
     
-        # Restore original catalog
+        # Restore clean catalog
         if use_full_catalog:
             self._gadgets._gadgets = original_gadgets
     
-        # Exit command handling
+        # Exit handling
         if cmd == "exit" and results is True:
             raise SystemExit(0)
     
