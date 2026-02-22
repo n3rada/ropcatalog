@@ -515,42 +515,57 @@ class Terminal:
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
     def copy_register(self, reg: str) -> list:
-        """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modifcation of copied register allowed."""
-
+        """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modification of copied register allowed."""
+        
         results = []
-
+        
         print(f"[*] Finding gadgets that copy {reg} register into another one.")
-
+        
         patterns = [
             rf"mov (\w+), {reg}",  # mov <reg>, reg
             rf"lea (\w+), \[{reg}.+?\]",
         ]
-
+        
         for gadget in self._gadgets:
-
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     matched_reg = match.group(1)
-
+                    
                     if matched_instruction not in gadget.instructions:
                         continue
-
+                    
                     matched_index = gadget.instructions.index(matched_instruction)
-
+                    
                     # Take only the instructions AFTER the matched one
-                    remaining_instructions = gadget.instructions[matched_index + 1 :]
-
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
                     # Check if the register is modified in the remaining instructions
-                    if not gadget.is_register_modified(
-                        matched_reg, remaining_instructions
-                    ):
+                    if not gadget.is_register_modified(matched_reg, remaining_instructions):
                         results.append(gadget)
-
+            
+            # Check for neg ; sbb ; and pattern
+            # Pattern: neg <dest> ; sbb <dest>, <dest> ; and <dest>, <source_reg>
+            # This effectively does: dest = source_reg
+            neg_sbb_and_pattern = rf"neg (\w+)\s*;\s*sbb \1, \1\s*;\s*and \1, {reg}"
+            if re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE):
+                match = re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE)
+                dest_reg = match.group(1)
+                
+                # Find the 'and' instruction
+                and_instr = f"and {dest_reg}, {reg}"
+                if and_instr in gadget.instructions:
+                    and_index = gadget.instructions.index(and_instr)
+                    remaining_instructions = gadget.instructions[and_index + 1:]
+                    
+                    # Check destination not modified after
+                    if not gadget.is_register_modified(dest_reg, remaining_instructions):
+                        results.append(gadget)
+            
             # Now, handle the 'push <reg>' case
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
                 results.append(gadget)
-
+        
         return results
 
     def stack_pivot(self, args: str = None) -> list:
