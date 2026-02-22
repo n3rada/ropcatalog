@@ -72,8 +72,7 @@ class Gadget:
         "vmxon",     # Turn on VMX
         "vmfunc",    # VM function
     }
-
-
+    
     MAX_RETN = 0x28  # 10 DWORDs = 40 bytes
 
     @staticmethod
@@ -266,11 +265,23 @@ class Gadgets:
         print(f"|-> Clean gadgets (filtered): {len(self._gadgets)}")
         print(f"|-> Bad gadgets (removed): {bad_gadget_count}")
 
+    def use_full_catalog(self, enabled: bool):
+        """Temporarily switch between clean and full catalog"""
+        if enabled:
+            self._active_list = self._full_list
+        else:
+            # Restore based on uniqueness mode
+            if self._unique_mode:
+                clean_gadgets = [g for g in self._full_list if not g.has_bad_op()]
+                self._active_list = self._filter_unique(clean_gadgets)
+            else:
+                self._active_list = [g for g in self._full_list if not g.has_bad_op()]
+
     def __iter__(self):
-        return iter(self._gadgets)
+        return iter(self._active_list)
 
     def __len__(self):
-        return len(self._gadgets)
+        return len(self._active_list)
 
     def add_gadget(self, gadget: Gadget) -> None:
         if isinstance(gadget, Gadget):
@@ -333,6 +344,3 @@ class Gadgets:
     def gadgets(self) -> list:
         return self._gadgets
 
-    @gadgets.setter
-    def gadgets(self, gadget_list: list):
-        self._gadgets = gadget_list
