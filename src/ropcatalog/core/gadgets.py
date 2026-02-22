@@ -277,7 +277,7 @@ class Gadgets:
         
         print(f"\n[+] Total gadgets loaded: {len(self._full_list)}")
         print(f"|-> Clean gadgets (filtered): {len(self._active_list)}")
-        print(f"|-> Bad gadgets (removed): {bad_gadget_count}")
+        print(f"|-> Bad gadgets (removed): {bad_count}")
 
     def use_full_catalog(self, enabled: bool):
         """Temporarily switch between clean and full catalog"""
@@ -305,10 +305,15 @@ class Gadgets:
 
     def set_uniqueness(self, enabled: bool):
         self._unique_mode = enabled
+        
+        # Always start with clean gadgets
+        clean_gadgets = [g for g in self._full_list if not g.has_bad_op()]
+        
         if enabled:
-            self._active_list = self._filter_unique(self._full_list)
+            self._active_list = self._filter_unique(clean_gadgets)  # ✅ Filter unique from CLEAN list
         else:
-            self._active_list = list(self._full_list)
+            self._active_list = clean_gadgets  # ✅ Use all CLEAN gadgets
+        
         print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._active_list)} gadgets)")
 
     def _filter_unique(self, gadgets_list):
