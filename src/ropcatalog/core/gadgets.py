@@ -102,17 +102,8 @@ class Gadget:
         return True
 
     def is_register_modified(self, reg: str, instructions: list) -> bool:
-        """
-        Checks if a register or its sub-registers are modified in the given instructions.
-        Supports x86 and x64 register formats.
-
-        Args:
-            reg (str): The register to check (e.g., "eax" or "rax").
-            instructions (list): A list of instruction strings.
-
-        Returns:
-            bool: True if the register or any sub-registers are modified, False otherwise.
-        """
+        """Check if register is modified in the given instructions"""
+        
         sub_registers_x86 = {
             "eax": ["eax", "ax", "al", "ah"],
             "ebx": ["ebx", "bx", "bl", "bh"],
@@ -147,13 +138,24 @@ class Gadget:
         registers_to_check = sub_registers.get(reg, [reg])
 
         for instr in instructions:
-            for reg_check in registers_to_check:
-                if "," in instr:
-                    if reg_check in instr.split(",")[0]:
+            # Check pop
+            if instr.strip().startswith("pop "):
+                parts = instr.split()
+                if len(parts) >= 2 and parts[1].strip() in registers_to_check:
+                    return True
+            
+            # Check xchg (modifies both operands)
+            if instr.strip().startswith("xchg "):
+                for reg_check in registers_to_check:
+                    if reg_check in instr:
                         return True
-                else:
-                    if f"pop {reg_check}" in instr:
-                        return True
+            
+            # Check comma-separated (destination is before comma)
+            if "," in instr:
+                dest = instr.split(",")[0].strip().split()[-1]  # Last word before comma
+                if dest in registers_to_check:
+                    return True
+        
         return False
 
     def has_bad_op(self) -> bool:
