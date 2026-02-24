@@ -101,7 +101,7 @@ class Gadget:
         
         return True
 
-   def is_register_modified(self, reg: str, instructions: list) -> bool:
+    def is_register_modified(self, reg: str, instructions: list) -> bool:
         """Check if register or its sub-registers are modified"""
         
         sub_registers_x86 = {
