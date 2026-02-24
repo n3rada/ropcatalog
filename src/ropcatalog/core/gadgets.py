@@ -101,8 +101,8 @@ class Gadget:
         
         return True
 
-    def is_register_modified(self, reg: str, instructions: list) -> bool:
-        """Check if register is modified in the given instructions"""
+   def is_register_modified(self, reg: str, instructions: list) -> bool:
+        """Check if register or its sub-registers are modified"""
         
         sub_registers_x86 = {
             "eax": ["eax", "ax", "al", "ah"],
@@ -114,7 +114,7 @@ class Gadget:
             "esi": ["esi", "si"],
             "edi": ["edi", "di"],
         }
-
+    
         sub_registers_x64 = {
             "rax": ["rax", "eax", "ax", "al", "ah"],
             "rbx": ["rbx", "ebx", "bx", "bl", "bh"],
@@ -133,26 +133,41 @@ class Gadget:
             "r14": ["r14", "r14d", "r14w", "r14b"],
             "r15": ["r15", "r15d", "r15w", "r15b"],
         }
-
+    
         sub_registers = sub_registers_x64 if self._arch == 'x64' else sub_registers_x86
         registers_to_check = sub_registers.get(reg, [reg])
-
+    
+        # Instructions that modify their operand (single-operand instructions)
+        single_operand_modifiers = ["inc", "dec", "neg", "not", "push", "pop", "bswap"]
+    
         for instr in instructions:
-            # Check pop
-            if instr.strip().startswith("pop "):
-                parts = instr.split()
+            instr_lower = instr.strip().lower()
+            
+            # Check for pop instruction
+            if instr_lower.startswith("pop "):
+                parts = instr_lower.split()
                 if len(parts) >= 2 and parts[1].strip() in registers_to_check:
                     return True
             
-            # Check xchg (modifies both operands)
-            if instr.strip().startswith("xchg "):
+            # Check for xchg (modifies both operands)
+            if instr_lower.startswith("xchg "):
                 for reg_check in registers_to_check:
-                    if reg_check in instr:
+                    if reg_check in instr_lower:
                         return True
             
-            # Check comma-separated (destination is before comma)
-            if "," in instr:
-                dest = instr.split(",")[0].strip().split()[-1]  # Last word before comma
+            # Check for single-operand modifying instructions (inc, dec, neg, etc.)
+            for modifier in single_operand_modifiers:
+                if instr_lower.startswith(modifier + " "):
+                    # Extract the operand
+                    parts = instr_lower.split()
+                    if len(parts) >= 2:
+                        operand = parts[1].strip()
+                        if operand in registers_to_check:
+                            return True
+            
+            # Check for comma-separated instructions (dest is before comma)
+            if "," in instr_lower:
+                dest = instr_lower.split(",")[0].strip().split()[-1]  # Last word before comma
                 if dest in registers_to_check:
                     return True
         
