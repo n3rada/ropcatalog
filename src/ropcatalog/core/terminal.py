@@ -340,16 +340,27 @@ class Terminal:
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
-                    # Extract which register is being modified
-                    dest_register = matched_instruction.split(',')[0].split()[-1].strip()
+                    # Parse the add instruction: add dest, source
+                    parts = matched_instruction.split(',')
+                    dest_register = parts[0].strip().split()[-1].strip()  # Register before comma
+                    source_register = parts[1].strip() if len(parts) > 1 else None  # Register after comma
                     
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
                     
-                    modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
-                    modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
+                    # Check destination register (modified by add)
+                    dest_modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
+                    dest_modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
                     
-                    if not modified_before and not modified_after:
+                    # Check if source register is modified BEFORE the add
+                    source_modified_before = False
+                    if source_register and gadgets.is_register(source_register, arch=gadget.arch):
+                        source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
+                    
+                    # Accept only if:
+                    # - Destination NOT modified before or after
+                    # - Source NOT modified before the add
+                    if not dest_modified_before and not dest_modified_after and not source_modified_before:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
@@ -416,16 +427,27 @@ class Terminal:
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
-                    # Extract which register is being modified
-                    dest_register = matched_instruction.split(',')[0].split()[-1].strip()
+                    # Parse the sub instruction: sub dest, source
+                    parts = matched_instruction.split(',')
+                    dest_register = parts[0].strip().split()[-1].strip()  # Register before comma
+                    source_register = parts[1].strip() if len(parts) > 1 else None  # Register after comma
                     
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
                     
-                    modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
-                    modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
+                    # Check BOTH registers
+                    dest_modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
+                    dest_modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
                     
-                    if not modified_before and not modified_after:
+                    # Check if source register is modified BEFORE the sub
+                    source_modified_before = False
+                    if source_register and gadgets.is_register(source_register, arch=gadget.arch):
+                        source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
+                    
+                    # Accept only if:
+                    # - Destination NOT modified before or after
+                    # - Source NOT modified before the sub
+                    if not dest_modified_before and not dest_modified_after and not source_modified_before:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
