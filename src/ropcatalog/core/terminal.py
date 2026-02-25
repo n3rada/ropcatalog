@@ -46,8 +46,14 @@ class Terminal:
             "copyto": self.copy_to_register,
             "save": self.save_register,
             "saveto": self.save_to_register,
+            "add": self.add_to_register,
+            "sub": self.sub_from_register,
             "inc": self.increment_register,
             "dec": self.decrement_register,
+            "addmem": self.add_to_memory,
+            "submem": self.sub_from_memory,
+            "incmem": self.increment_memory,
+            "decmem": self.decrement_memory,
             "read": self.dereference_register,  # Alias for deref
             "deref": self.dereference_register,
             "writereg": self.write_register_to_memory,     # writereg rcx → mov [rax], rcx
@@ -68,8 +74,6 @@ class Terminal:
             "nop": self.find_nop,
             "syscall": self.find_syscall,
             "loadcr": self.load_cr,
-            "add": self.add_to_register,
-            "sub": self.sub_from_register,
         }
 
     def change_style(self, style_name: str = None) -> None:
@@ -202,6 +206,10 @@ class Terminal:
                 "writereg": "Write register to memory (e.g., writereg rcx finds mov [<any>], rcx)",
                 "writeptr": "Write to memory pointer (e.g., writeptr rax finds mov [rax], <any>)",
                 "writebyte": "Write byte to pointer (e.g., writebyte rax finds mov byte [rax], <any>)",
+                "addmem": "Add to memory value (e.g., addmem rax rcx OR addmem rax)",
+                "submem": "Subtract from memory (e.g., submem rax rcx OR submem rax)",
+                "incmem": "Increment memory (e.g., incmem rax finds inc [rax])",
+                "decmem": "Decrement memory (e.g., decmem rax finds dec [rax])",
             },
             "Stack Operations": {
                 "push": "Push register to stack (e.g., push rax)",
@@ -453,7 +461,207 @@ class Terminal:
                         break
         
         return results
+
+    def add_to_memory(self, args: str = None) -> list:
+        """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any)"""
         
+        if not args:
+            print("[!] Usage: addmem <pointer_register> [source_register]")
+            print("\tExample: addmem rax rcx  (finds add [rax], rcx)")
+            print("\tExample: addmem rax      (finds any add [rax], <reg/imm>)")
+            print("\tNote: For increment by 1, use 'incmem' command")
+            return []
+        
+        parts = args.split()
+        ptr_reg = parts[0].strip()
+        source = parts[1].strip() if len(parts) > 1 else None
+        
+        if source:
+            # Specific source (register or immediate pattern)
+            print(f"[*] Finding gadgets that add {source} to [{ptr_reg}]")
+            patterns = [
+                rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+                rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+            ]
+        else:
+            # Any source
+            print(f"[*] Finding gadgets that add any value to [{ptr_reg}]")
+            patterns = [
+                rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+                rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+            ]
+        
+        results = []
+        seen = set()
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    # Check pointer register not modified before or after
+                    ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
+                    ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
+                    
+                    if not ptr_modified_before and not ptr_modified_after:
+                        results.append(gadget)
+                        seen.add(gadget_key)
+                        break
+        
+        return results
+    
+    def sub_from_memory(self, args: str = None) -> list:
+        """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any)"""
+        
+        if not args:
+            print("[!] Usage: submem <pointer_register> [source_register]")
+            print("\tExample: submem rax rcx  (finds sub [rax], rcx)")
+            print("\tExample: submem rax      (finds any sub [rax], <reg/imm>)")
+            print("\tNote: For decrement by 1, use 'decmem' command")
+            return []
+        
+        parts = args.split()
+        ptr_reg = parts[0].strip()
+        source = parts[1].strip() if len(parts) > 1 else None
+        
+        if source:
+            print(f"[*] Finding gadgets that subtract {source} from [{ptr_reg}]")
+            patterns = [
+                rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+                rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+            ]
+        else:
+            print(f"[*] Finding gadgets that subtract any value from [{ptr_reg}]")
+            patterns = [
+                rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+                rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+            ]
+        
+        results = []
+        seen = set()
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
+                    ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
+                    
+                    if not ptr_modified_before and not ptr_modified_after:
+                        results.append(gadget)
+                        seen.add(gadget_key)
+                        break
+        
+        return results
+    
+    def increment_memory(self, ptr_reg: str) -> list:
+        """Increment value in memory (e.g., incmem rax finds inc qword [rax])"""
+        
+        print(f"[*] Finding gadgets that increment [{ptr_reg}]")
+        
+        patterns = [
+            rf"inc\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"inc\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+        ]
+        
+        results = []
+        seen = set()
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
+                    ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
+                    
+                    if not ptr_modified_before and not ptr_modified_after:
+                        results.append(gadget)
+                        seen.add(gadget_key)
+                        break
+        
+        return results
+    
+    def decrement_memory(self, ptr_reg: str) -> list:
+        """Decrement value in memory (e.g., decmem rax finds dec qword [rax])"""
+        
+        print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
+        
+        patterns = [
+            rf"dec\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"dec\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+        ]
+        
+        results = []
+        seen = set()
+        
+        for gadget in self._gadgets:
+            if matches := gadget.pattern_match(patterns):
+                for match in matches:
+                    matched_instruction = match.group(0)
+                    
+                    if matched_instruction not in gadget.instructions:
+                        continue
+                    
+                    gadget_key = (gadget.address, gadget.module)
+                    if gadget_key in seen:
+                        continue
+                    
+                    matched_index = gadget.instructions.index(matched_instruction)
+                    
+                    preceding_instructions = gadget.instructions[:matched_index]
+                    remaining_instructions = gadget.instructions[matched_index + 1:]
+                    
+                    ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
+                    ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
+                    
+                    if not ptr_modified_before and not ptr_modified_after:
+                        results.append(gadget)
+                        seen.add(gadget_key)
+                        break
+        
+        return results
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
