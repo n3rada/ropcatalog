@@ -72,6 +72,7 @@ class Terminal:
             "pivot": self.stack_pivot,
             "writebyte": self.write_byte,
             "nop": self.find_nop,
+            "funcnop": self.find_functional_nop,
             "syscall": self.find_syscall,
             "loadcr": self.load_cr,
         }
@@ -224,6 +225,7 @@ class Terminal:
                 "syscall": "Syscall/sysenter gadgets",
                 "loadcr": "Load control register (e.g., loadcr rcx finds mov cr4, rcx)",
                 "nop": "NOP sequences for padding/alignment",
+                "funcnop": "Functional NOP sequences for padding/alignment",
             },
         }
         
@@ -796,52 +798,10 @@ class Terminal:
                 results.append(gadget)
         
         return results
-
+    
     def find_nop(self, fake_arg=None) -> list:
-        """Find NOP sequences (true NOPs and functional NOPs like add rax, 0)"""
-        print("[*] Finding NOP sequences (true NOPs + functional NOPs)")
-        
-        # Functional NOP patterns (instructions that do nothing useful)
-        functional_nop_patterns = [
-            # Zero additions/subtractions
-            r"^add\s+\w+,\s*0x0+$",
-            r"^add\s+\w+,\s*0$",
-            r"^sub\s+\w+,\s*0x0+$",
-            r"^sub\s+\w+,\s*0$",
-            r"^add\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0x0+$",  # add [rax], 0x00
-            r"^add\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0$",
-            r"^sub\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0x0+$",
-            r"^sub\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0$",
-            
-            # OR/XOR with zero (sets to zero, but might be intentional)
-            r"^or\s+\w+,\s*0x0+$",
-            r"^or\s+\w+,\s*0$",
-            
-            # AND with all 1s (no effect)
-            r"^and\s+\w+,\s*0xf+$",
-            
-            # Move register to itself
-            r"^mov\s+(\w+),\s*\1$",  # mov rax, rax
-            
-            # LEA with zero offset
-            r"^lea\s+(\w+),\s*\[\1\]$",  # lea rax, [rax]
-            r"^lea\s+(\w+),\s*\[\1\+0x0+\]$",  # lea rax, [rax+0]
-            r"^lea\s+(\w+),\s*\[\1\+0\]$",
-            
-            # Test/cmp without side effects (sets flags only)
-            r"^test\s+\w+,\s*\w+$",
-            r"^cmp\s+\w+,\s*\w+$",
-            
-            # Conditional moves that always fail
-            r"^cmovz\s+\w+,\s*\w+$",  # Only if ZF=1
-            r"^cmovnz\s+\w+,\s*\w+$",  # Only if ZF=0
-            
-            # Flag operations (usually benign)
-            r"^clc$",   # Clear carry flag
-            r"^stc$",   # Set carry flag
-            r"^cld$",   # Clear direction flag
-            r"^std$",   # Set direction flag
-        ]
+        """Find TRUE NOP sequences (single-byte NOPs only, no stack manipulation)"""
+        print("[*] Finding true NOP sequences")
         
         results = []
         
@@ -853,28 +813,56 @@ class Terminal:
             if not instructions or instructions[-1].strip() != "ret":
                 continue
             
-            # Check if ALL instructions before ret are NOPs (literal or functional)
-            all_nops = True
+            # All instructions before ret must be simple "nop"
+            all_simple_nops = True
             for instr in instructions[:-1]:
-                instr_clean = instr.strip()
-                
-                # Check for literal "nop"
-                if instr_clean == "nop":
-                    continue
-                
-                # Check for functional NOPs
-                is_functional_nop = False
-                for pattern in functional_nop_patterns:
-                    if re.match(pattern, instr_clean, re.IGNORECASE):
-                        is_functional_nop = True
-                        break
-                
-                if not is_functional_nop:
-                    all_nops = False
+                if instr.strip() != "nop":
+                    all_simple_nops = False
                     break
             
-            # Need at least one NOP instruction
-            if all_nops and len(instructions) >= 2:
+            # Need at least one nop
+            if all_simple_nops and len(instructions) >= 2:
+                results.append(gadget)
+        
+        return results
+
+    def find_functional_nop(self, fake_arg=None) -> list:
+        """Find functional NOP sequences (add rax, 0; mov rax, rax; etc.)"""
+        print("[*] Finding functional NOP sequences")
+        
+        functional_nop_patterns = [
+            r"^add\s+\w+,\s*0x0+$",
+            r"^add\s+\w+,\s*0$",
+            r"^sub\s+\w+,\s*0x0+$",
+            r"^sub\s+\w+,\s*0$",
+            r"^add\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0x0+$",
+            r"^add\s+(?:\w+\s+)?(?:ptr\s+)?\[[\w+\-\+0-9x]+\],\s*0$",
+            r"^mov\s+(\w+),\s*\1$",
+            r"^lea\s+(\w+),\s*\[\1\]$",
+            r"^xchg\s+(\w+),\s*\1$",  # xchg rax, rax (rare but valid NOP)
+        ]
+        
+        results = []
+        
+        for gadget in self._gadgets:
+            instructions = [i.strip() for i in gadget.raw.split(";") if i.strip()]
+            
+            if not instructions or instructions[-1].strip() != "ret":
+                continue
+            
+            all_functional_nops = True
+            for instr in instructions[:-1]:
+                is_nop = False
+                for pattern in functional_nop_patterns:
+                    if re.match(pattern, instr.strip(), re.IGNORECASE):
+                        is_nop = True
+                        break
+                
+                if not is_nop:
+                    all_functional_nops = False
+                    break
+            
+            if all_functional_nops and len(instructions) >= 2:
                 results.append(gadget)
         
         return results
