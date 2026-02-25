@@ -1158,8 +1158,8 @@ class Terminal:
         """Write to memory pointed by register (e.g., writeto rax finds mov [rax], <any>)"""
         
         if not reg:
-            print("[!] Usage: writeto <pointer_register>")
-            print("    Example: writeto rax  (finds mov [rax], rcx)")
+            print("[!] Usage: writeptr <pointer_register>")
+            print("    Example: writeptr rax  (finds mov [rax], rcx)")
             return []
         
         print(f"[*] Finding gadgets that write to memory pointed by {reg}")
