@@ -17,7 +17,7 @@ from prompt_toolkit.completion import WordCompleter
 # Local library imports
 from . import gadgets
 from . import formatters
-
+from . import registers
 
 class Terminal:
     """
@@ -362,7 +362,7 @@ class Terminal:
                     
                     # Check if source register is modified BEFORE the add
                     source_modified_before = False
-                    if source_register and gadgets.is_register(source_register, arch=gadget.arch):
+                    if source_register and registers.is_register(source_register, arch=gadget.arch):
                         source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
                     
                     # Accept only if:
@@ -449,7 +449,7 @@ class Terminal:
                     
                     # Check if source register is modified BEFORE the sub
                     source_modified_before = False
-                    if source_register and gadgets.is_register(source_register, arch=gadget.arch):
+                    if source_register and registers.is_register(source_register, arch=gadget.arch):
                         source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
                     
                     # Accept only if:
@@ -839,7 +839,7 @@ class Terminal:
                             if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                                 source_reg = match.group(1)
                                 
-                                if gadgets.is_register(source_reg, arch=arch):
+                                if registers.is_register(source_reg, arch=arch):
                                     remaining = instructions[i+1:-1]
                                     
                                     clobbered = any(
@@ -986,7 +986,7 @@ class Terminal:
                     matched_reg = match.group(1)
 
                     # Ensure the matched_reg is a register
-                    if not gadgets.is_register(matched_reg, arch=gadget.arch):
+                    if not registers.is_register(matched_reg, arch=gadget.arch):
                         continue
 
                     if matched_instruction not in gadget.instructions:
@@ -1387,7 +1387,7 @@ class Terminal:
                     source_reg = match.group(1)  # The source register being written
                     
                     # Validate it's actually a register (not an immediate like 0x0)
-                    if not gadgets.is_register(source_reg, arch=gadget.arch):
+                    if not registers.is_register(source_reg, arch=gadget.arch):
                         continue
                     
                     if matched_instruction not in gadget.instructions:
