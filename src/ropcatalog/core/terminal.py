@@ -468,8 +468,8 @@ class Terminal:
         if not args:
             print("[!] Usage: addmem <pointer_register> [source_register]")
             print("\tExample: addmem rax rcx  (finds add [rax], rcx)")
-            print("\tExample: addmem rax      (finds any add [rax], <reg/imm>)")
-            print("\tNote: For increment by 1, use 'incmem' command")
+            print("\tExample: addmem rax      (finds any add [rax], <reg>)")
+            print("\tNote: For increment by constant, use 'incmem' command")
             return []
         
         parts = args.split()
@@ -477,15 +477,20 @@ class Terminal:
         source = parts[1].strip() if len(parts) > 1 else None
         
         if source:
-            # Specific source (register or immediate pattern)
+            # Specific source (must be a register, not immediate)
+            if source.startswith("0x") or source.isdigit():
+                print(f"[!] Source '{source}' is an immediate value")
+                print("[i] Use 'incmem' for adding constants (e.g., incmem rax)")
+                return []
+            
             print(f"[*] Finding gadgets that add {source} to [{ptr_reg}]")
             patterns = [
                 rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
                 rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
             ]
         else:
-            # Any source
-            print(f"[*] Finding gadgets that add any value to [{ptr_reg}]")
+            # Any REGISTER source (NOT immediates)
+            print(f"[*] Finding gadgets that add any register to [{ptr_reg}]")
             patterns = [
                 rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
@@ -505,6 +510,18 @@ class Terminal:
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
+                    
+                    # If no specific source, validate it's a REGISTER (not immediate)
+                    if not source and len(match.groups()) > 0:
+                        candidate = match.group(1)
+                        
+                        # Skip if it's an immediate value
+                        if candidate.startswith("0x") or candidate.isdigit():
+                            continue
+                        
+                        # Verify it's actually a register
+                        if not registers.is_register(candidate, arch=gadget.arch):
+                            continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
@@ -528,8 +545,8 @@ class Terminal:
         if not args:
             print("[!] Usage: submem <pointer_register> [source_register]")
             print("\tExample: submem rax rcx  (finds sub [rax], rcx)")
-            print("\tExample: submem rax      (finds any sub [rax], <reg/imm>)")
-            print("\tNote: For decrement by 1, use 'decmem' command")
+            print("\tExample: submem rax      (finds any sub [rax], <reg>)")
+            print("\tNote: For decrement by constant, use 'decmem' command")
             return []
         
         parts = args.split()
@@ -537,13 +554,20 @@ class Terminal:
         source = parts[1].strip() if len(parts) > 1 else None
         
         if source:
+            # Validate source is a register, not an immediate
+            if source.startswith("0x") or source.isdigit():
+                print(f"[!] Source '{source}' is an immediate value")
+                print("[i] Use 'decmem' for subtracting constants (e.g., decmem rax)")
+                return []
+            
             print(f"[*] Finding gadgets that subtract {source} from [{ptr_reg}]")
             patterns = [
                 rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
                 rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
             ]
         else:
-            print(f"[*] Finding gadgets that subtract any value from [{ptr_reg}]")
+            # Any REGISTER source (NOT immediates)
+            print(f"[*] Finding gadgets that subtract any register from [{ptr_reg}]")
             patterns = [
                 rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
@@ -564,6 +588,18 @@ class Terminal:
                     if gadget_key in seen:
                         continue
                     
+                    # If no specific source, validate it's a REGISTER (not immediate)
+                    if not source and len(match.groups()) > 0:
+                        candidate = match.group(1)
+                        
+                        # Skip if it's an immediate value
+                        if candidate.startswith("0x") or candidate.isdigit():
+                            continue
+                        
+                        # Verify it's actually a register
+                        if not registers.is_register(candidate, arch=gadget.arch):
+                            continue
+                    
                     matched_index = gadget.instructions.index(matched_instruction)
                     
                     preceding_instructions = gadget.instructions[:matched_index]
@@ -580,15 +616,17 @@ class Terminal:
         return results
     
     def increment_memory(self, ptr_reg: str) -> list:
-        """Increment value in memory (e.g., incmem rax finds inc qword [rax])"""
+        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <constant>)"""
         
         print(f"[*] Finding gadgets that increment [{ptr_reg}]")
         
         patterns = [
             rf"inc\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
-            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
         ]
         
         results = []
@@ -622,15 +660,17 @@ class Terminal:
         return results
     
     def decrement_memory(self, ptr_reg: str) -> list:
-        """Decrement value in memory (e.g., decmem rax finds dec qword [rax])"""
+        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <constant>)"""
         
         print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
         
         patterns = [
             rf"dec\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
-            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*1",
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
         ]
         
         results = []
@@ -662,6 +702,7 @@ class Terminal:
                         break
         
         return results
+        
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
