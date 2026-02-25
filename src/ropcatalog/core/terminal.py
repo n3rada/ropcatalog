@@ -463,7 +463,7 @@ class Terminal:
         return results
 
     def add_to_memory(self, args: str = None) -> list:
-        """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any)"""
+        """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any register)"""
         
         if not args:
             print("[!] Usage: addmem <pointer_register> [source_register]")
@@ -474,19 +474,20 @@ class Terminal:
         
         parts = args.split()
         ptr_reg = parts[0].strip()
-        source = parts[1].strip() if len(parts) > 1 else None
+        source_reg = parts[1].strip() if len(parts) > 1 else None
         
-        if source:
-            # Specific source (must be a register, not immediate)
-            if source.startswith("0x") or source.isdigit():
-                print(f"[!] Source '{source}' is an immediate value")
+        if source_reg:
+            # Validate source is a register, not an immediate
+            if source_reg.startswith("0x") or source_reg.isdigit():
+                print(f"[!] Source '{source_reg}' is an immediate value")
                 print("[i] Use 'incmem' for adding constants (e.g., incmem rax)")
                 return []
             
-            print(f"[*] Finding gadgets that add {source} to [{ptr_reg}]")
+            print(f"[*] Finding gadgets that add {source_reg} to [{ptr_reg}]")
             patterns = [
-                rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
-                rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+                rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
+                rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
+                rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
             ]
         else:
             # Any REGISTER source (NOT immediates)
@@ -494,6 +495,7 @@ class Terminal:
             patterns = [
                 rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+                rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
             ]
         
         results = []
@@ -511,15 +513,15 @@ class Terminal:
                     if gadget_key in seen:
                         continue
                     
-                    # If no specific source, validate it's a REGISTER (not immediate)
-                    if not source and len(match.groups()) > 0:
+                    # If no specific source_reg, validate captured source is a REGISTER
+                    if not source_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
                         
-                        # Skip if it's an immediate value
+                        # Skip if it's an immediate value (0x02, 123, etc.)
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
                         
-                        # Verify it's actually a register
+                        # Verify it's actually a valid register
                         if not registers.is_register(candidate, arch=gadget.arch):
                             continue
                     
@@ -540,7 +542,7 @@ class Terminal:
         return results
     
     def sub_from_memory(self, args: str = None) -> list:
-        """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any)"""
+        """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any register)"""
         
         if not args:
             print("[!] Usage: submem <pointer_register> [source_register]")
@@ -551,19 +553,20 @@ class Terminal:
         
         parts = args.split()
         ptr_reg = parts[0].strip()
-        source = parts[1].strip() if len(parts) > 1 else None
+        source_reg = parts[1].strip() if len(parts) > 1 else None
         
-        if source:
+        if source_reg:
             # Validate source is a register, not an immediate
-            if source.startswith("0x") or source.isdigit():
-                print(f"[!] Source '{source}' is an immediate value")
+            if source_reg.startswith("0x") or source_reg.isdigit():
+                print(f"[!] Source '{source_reg}' is an immediate value")
                 print("[i] Use 'decmem' for subtracting constants (e.g., decmem rax)")
                 return []
             
-            print(f"[*] Finding gadgets that subtract {source} from [{ptr_reg}]")
+            print(f"[*] Finding gadgets that subtract {source_reg} from [{ptr_reg}]")
             patterns = [
-                rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
-                rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source}",
+                rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
+                rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
+                rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
             ]
         else:
             # Any REGISTER source (NOT immediates)
@@ -571,6 +574,7 @@ class Terminal:
             patterns = [
                 rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
+                rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
             ]
         
         results = []
@@ -588,15 +592,15 @@ class Terminal:
                     if gadget_key in seen:
                         continue
                     
-                    # If no specific source, validate it's a REGISTER (not immediate)
-                    if not source and len(match.groups()) > 0:
+                    # If no specific source_reg, validate captured source is a REGISTER
+                    if not source_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
                         
                         # Skip if it's an immediate value
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
                         
-                        # Verify it's actually a register
+                        # Verify it's actually a valid register
                         if not registers.is_register(candidate, arch=gadget.arch):
                             continue
                     
