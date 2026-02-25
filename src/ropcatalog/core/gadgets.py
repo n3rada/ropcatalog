@@ -6,36 +6,22 @@ from pathlib import Path
 import time
 from typing import Union, List
 
+# Local imports
+from .registers import (
+    get_registers,
+    get_volatile_registers,
+    get_nonvolatile_registers,
+    get_sub_registers,
+    is_register,
+    SINGLE_OPERAND_MODIFIERS
+)
+
 def sort_key(gadget: 'Gadget') -> tuple:
     instr_count = len(gadget.instructions)
     # Penalize retn IMM to deprioritize large stack shifts
     if "retn 0x" in gadget.raw:
         return (instr_count + 0.5, int(re.search(r"retn 0x([0-9a-fA-F]+)", gadget.raw).group(1), 16))
     return (instr_count, 0)
-
-def is_register(operand: str, arch: str = 'x86') -> bool:
-    """
-    Checks if the operand is a valid register for the given architecture.
-    Returns True if operand is a register, False otherwise (e.g., for '0x...' immediates).
-    """
-    registers_x86 = {
-        "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
-        "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
-        "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh"
-    }
-    registers_x64 = registers_x86 | {
-        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
-        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-        "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
-        "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
-        "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
-        "sil", "dil"
-    }
-    registers = registers_x64 if arch == 'x64' else registers_x86
-    operand = operand.lower().strip()
-    if operand.startswith("0x"):
-        return False
-    return operand in registers
 
 
 class Gadget:
@@ -75,71 +61,23 @@ class Gadget:
 
     
     def uses_only_volatile_regs(self) -> bool:
-        """Check if gadget only modifies volatile (caller-saved) registers"""
+        """Check if gadget only uses volatile (caller-saved) registers"""
         
-        # Non-volatile (callee-saved) registers
-        nonvolatile_x86 = {"ebx", "ebp", "esi", "edi", "esp", "bx", "bp", "si", "di", "sp"}
-        nonvolatile_x64 = {"rbx", "rbp", "rsi", "rdi", "rsp", "r12", "r13", "r14", "r15",
-                           "ebx", "ebp", "esi", "edi", "esp", "r12d", "r13d", "r14d", "r15d",
-                           "bx", "bp", "si", "di", "sp", "r12w", "r13w", "r14w", "r15w",
-                           "bl", "bh", "bpl", "sil", "dil", "spl", "r12b", "r13b", "r14b", "r15b"}
+        nonvolatile = get_nonvolatile_registers(self._arch)
         
-        nonvolatile = nonvolatile_x64 if self._arch == 'x64' else nonvolatile_x86
-        
-        # Check each instruction (except ret)
-        for instr in self._instructions[:-1]:  # Exclude 'ret'
-            if "," in instr:
-                # Check destination register
-                dest = instr.split(",")[0].strip().split()[-1]  # Get last word before comma
-                if dest.lower() in nonvolatile:
-                    return False
-            elif instr.startswith("pop "):
-                # Check what's being popped
-                reg = instr.split()[1].strip()
-                if reg.lower() in nonvolatile:
-                    return False
+        # Check if any non-volatile register appears in the gadget
+        for nv_reg in nonvolatile:
+            if re.search(rf'\b{nv_reg}\b', self._raw, re.IGNORECASE):
+                return False
         
         return True
 
     def is_register_modified(self, reg: str, instructions: list) -> bool:
         """Check if register or its sub-registers are modified"""
         
-        sub_registers_x86 = {
-            "eax": ["eax", "ax", "al", "ah"],
-            "ebx": ["ebx", "bx", "bl", "bh"],
-            "ecx": ["ecx", "cx", "cl", "ch"],
-            "edx": ["edx", "dx", "dl", "dh"],
-            "esp": ["esp", "sp"],
-            "ebp": ["ebp", "bp"],
-            "esi": ["esi", "si"],
-            "edi": ["edi", "di"],
-        }
-    
-        sub_registers_x64 = {
-            "rax": ["rax", "eax", "ax", "al", "ah"],
-            "rbx": ["rbx", "ebx", "bx", "bl", "bh"],
-            "rcx": ["rcx", "ecx", "cx", "cl", "ch"],
-            "rdx": ["rdx", "edx", "dx", "dl", "dh"],
-            "rsp": ["rsp", "esp", "sp"],
-            "rbp": ["rbp", "ebp", "bp"],
-            "rsi": ["rsi", "esi", "si", "sil"],
-            "rdi": ["rdi", "edi", "di", "dil"],
-            "r8": ["r8", "r8d", "r8w", "r8b"],
-            "r9": ["r9", "r9d", "r9w", "r9b"],
-            "r10": ["r10", "r10d", "r10w", "r10b"],
-            "r11": ["r11", "r11d", "r11w", "r11b"],
-            "r12": ["r12", "r12d", "r12w", "r12b"],
-            "r13": ["r13", "r13d", "r13w", "r13b"],
-            "r14": ["r14", "r14d", "r14w", "r14b"],
-            "r15": ["r15", "r15d", "r15w", "r15b"],
-        }
-    
-        sub_registers = sub_registers_x64 if self._arch == 'x64' else sub_registers_x86
+        sub_registers = get_sub_registers(self._arch)
         registers_to_check = sub_registers.get(reg, [reg])
-    
-        # Instructions that modify their operand (single-operand instructions)
-        single_operand_modifiers = ["inc", "dec", "neg", "not", "push", "pop", "bswap"]
-    
+
         for instr in instructions:
             instr_lower = instr.strip().lower()
             
@@ -152,13 +90,12 @@ class Gadget:
             # Check for xchg (modifies both operands)
             if instr_lower.startswith("xchg "):
                 for reg_check in registers_to_check:
-                    if reg_check in instr_lower:
+                    if re.search(rf'\b{reg_check}\b', instr_lower):
                         return True
             
-            # Check for single-operand modifying instructions (inc, dec, neg, etc.)
-            for modifier in single_operand_modifiers:
+            # Check for single-operand modifying instructions
+            for modifier in SINGLE_OPERAND_MODIFIERS:
                 if instr_lower.startswith(modifier + " "):
-                    # Extract the operand
                     parts = instr_lower.split()
                     if len(parts) >= 2:
                         operand = parts[1].strip()
@@ -167,7 +104,7 @@ class Gadget:
             
             # Check for comma-separated instructions (dest is before comma)
             if "," in instr_lower:
-                dest = instr_lower.split(",")[0].strip().split()[-1]  # Last word before comma
+                dest = instr_lower.split(",")[0].strip().split()[-1]
                 if dest in registers_to_check:
                     return True
         
