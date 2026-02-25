@@ -620,7 +620,7 @@ class Terminal:
         return results
     
     def increment_memory(self, ptr_reg: str) -> list:
-        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], 0x28)"""
+        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <non-zero>)"""
         
         print(f"[*] Finding gadgets that increment [{ptr_reg}]")
         
@@ -631,17 +631,17 @@ class Terminal:
             rf"inc\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             
-            # add with immediate (hex)
-            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            # add with immediate (hex) - captures the value
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             
-            # add with immediate (decimal)
-            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            # add with immediate (decimal) - captures the value
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
         ]
         
         results = []
@@ -658,6 +658,20 @@ class Terminal:
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
+                    
+                    # Check if there's a captured immediate value
+                    if len(match.groups()) > 0 and match.group(1):
+                        imm_str = match.group(1)
+                        
+                        # Parse the immediate value
+                        if imm_str.startswith("0x"):
+                            imm_value = int(imm_str, 16)
+                        else:
+                            imm_value = int(imm_str, 10)
+                        
+                        # Skip if immediate is zero (no-op)
+                        if imm_value == 0:
+                            continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
@@ -675,7 +689,7 @@ class Terminal:
         return results
     
     def decrement_memory(self, ptr_reg: str) -> list:
-        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], 0x28)"""
+        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <non-zero>)"""
         
         print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
         
@@ -686,17 +700,17 @@ class Terminal:
             rf"dec\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             
-            # sub with immediate (hex)
-            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
-            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            # sub with immediate (hex) - captures the value
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
+            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             
-            # sub with immediate (decimal)
-            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
-            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            # sub with immediate (decimal) - captures the value
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
+            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
         ]
         
         results = []
@@ -713,6 +727,20 @@ class Terminal:
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
+                    
+                    # Check if there's a captured immediate value
+                    if len(match.groups()) > 0 and match.group(1):
+                        imm_str = match.group(1)
+                        
+                        # Parse the immediate value
+                        if imm_str.startswith("0x"):
+                            imm_value = int(imm_str, 16)
+                        else:
+                            imm_value = int(imm_str, 10)
+                        
+                        # Skip if immediate is zero (no-op)
+                        if imm_value == 0:
+                            continue
                     
                     matched_index = gadget.instructions.index(matched_instruction)
                     
@@ -1187,15 +1215,16 @@ class Terminal:
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
     def increment_register(self, reg: str) -> list:
-        """Find gadgets that increment a register (e.g., inc rax)"""
+        """Find gadgets that increment a register (e.g., inc rax OR add rax, <non-zero>)"""
         
         print(f"[*] Finding gadgets that increment {reg}")
         
         patterns = [
-            rf"add {reg}, 0x[0-9a-fA-F]+",
-            rf"sub {reg}, -0x[0-9a-fA-F]+",
             rf"inc {reg}",
-            rf"lea {reg}, \[{reg}\+0x[0-9a-fA-F]+\]",
+            rf"add {reg}, (0x[0-9a-fA-F]+)",  # Capture hex value
+            rf"add {reg}, ([1-9][0-9]*)",      # Capture non-zero decimal
+            rf"sub {reg}, (-0x[0-9a-fA-F]+)",  # Negative hex (rarely used)
+            rf"lea {reg}, \[{reg}\+(0x[0-9a-fA-F]+)\]",  # Capture offset
         ]
         
         results = []
@@ -1209,34 +1238,47 @@ class Terminal:
                         if matched_instruction not in gadget.instructions:
                             continue
                         
+                        # Check if there's a captured immediate value
+                        if len(match.groups()) > 0 and match.group(1):
+                            imm_str = match.group(1)
+                            
+                            # Parse the immediate value
+                            if imm_str.startswith("0x"):
+                                imm_value = int(imm_str, 16)
+                            elif imm_str.startswith("-0x"):
+                                imm_value = int(imm_str, 16)  # Will be negative
+                            else:
+                                imm_value = int(imm_str, 10)
+                            
+                            # Skip if immediate is zero (no-op)
+                            if imm_value == 0:
+                                continue
+                        
                         matched_index = gadget.instructions.index(matched_instruction)
                         
-                        # Instructions BEFORE the increment
                         preceding_instructions = gadget.instructions[:matched_index]
-                        
-                        # Instructions AFTER the increment
                         remaining_instructions = gadget.instructions[matched_index + 1:]
                         
-                        # Check register NOT modified before OR after
                         modified_before = gadget.is_register_modified(reg, preceding_instructions)
                         modified_after = gadget.is_register_modified(reg, remaining_instructions)
                         
                         if not modified_before and not modified_after:
                             results.append(gadget)
-                            break  # Don't add same gadget multiple times
+                            break
         
         return results
 
     def decrement_register(self, reg: str) -> list:
-        """Find gadgets that decrement a register (e.g., dec rax)"""
+        """Find gadgets that decrement a register (e.g., dec rax OR sub rax, <non-zero>)"""
         
         print(f"[*] Finding gadgets that decrement {reg}")
         
         patterns = [
-            rf"sub {reg}, 0x[0-9a-fA-F]+",
-            rf"add {reg}, -0x[0-9a-fA-F]+",
             rf"dec {reg}",
-            rf"lea {reg}, \[{reg}\-0x[0-9a-fA-F]+\]",
+            rf"sub {reg}, (0x[0-9a-fA-F]+)",    # Capture hex value
+            rf"sub {reg}, ([1-9][0-9]*)",        # Capture non-zero decimal
+            rf"add {reg}, (-0x[0-9a-fA-F]+)",    # Negative hex
+            rf"lea {reg}, \[{reg}\-(0x[0-9a-fA-F]+)\]",  # Capture offset
         ]
         
         results = []
@@ -1250,15 +1292,27 @@ class Terminal:
                         if matched_instruction not in gadget.instructions:
                             continue
                         
+                        # Check if there's a captured immediate value
+                        if len(match.groups()) > 0 and match.group(1):
+                            imm_str = match.group(1)
+                            
+                            # Parse the immediate value
+                            if imm_str.startswith("0x"):
+                                imm_value = int(imm_str, 16)
+                            elif imm_str.startswith("-0x"):
+                                imm_value = int(imm_str, 16)
+                            else:
+                                imm_value = int(imm_str, 10)
+                            
+                            # Skip if immediate is zero (no-op)
+                            if imm_value == 0:
+                                continue
+                        
                         matched_index = gadget.instructions.index(matched_instruction)
                         
-                        # Instructions BEFORE the decrement
                         preceding_instructions = gadget.instructions[:matched_index]
-                        
-                        # Instructions AFTER the decrement (excluding ret)
                         remaining_instructions = gadget.instructions[matched_index + 1:]
                         
-                        # Check register NOT modified before OR after
                         modified_before = gadget.is_register_modified(reg, preceding_instructions)
                         modified_after = gadget.is_register_modified(reg, remaining_instructions)
                         
