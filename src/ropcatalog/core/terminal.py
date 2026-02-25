@@ -620,17 +620,28 @@ class Terminal:
         return results
     
     def increment_memory(self, ptr_reg: str) -> list:
-        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <constant>)"""
+        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], 0x28)"""
         
         print(f"[*] Finding gadgets that increment [{ptr_reg}]")
         
         patterns = [
+            # inc instruction
             rf"inc\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
-            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
-            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
-            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
+            rf"inc\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"inc\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            
+            # add with immediate (hex)
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            
+            # add with immediate (decimal)
+            rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
         ]
         
         results = []
@@ -664,17 +675,28 @@ class Terminal:
         return results
     
     def decrement_memory(self, ptr_reg: str) -> list:
-        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <constant>)"""
+        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], 0x28)"""
         
         print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
         
         patterns = [
+            # dec instruction
             rf"dec\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
-            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",  # Immediate
-            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
-            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[1-9]\d*",        # Decimal
+            rf"dec\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            rf"dec\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
+            
+            # sub with immediate (hex)
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*0x[0-9a-fA-F]+",
+            
+            # sub with immediate (decimal)
+            rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
+            rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*[0-9]+",
         ]
         
         results = []
