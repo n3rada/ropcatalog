@@ -27,7 +27,7 @@ def sort_key(gadget: 'Gadget') -> tuple:
 class Gadget:
     BAD_OPS = {
         # Control flow
-        "int3", "leave", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
+        "int3", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
         "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe",
         
         # System control
