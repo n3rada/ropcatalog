@@ -945,7 +945,7 @@ class Terminal:
         if mode not in ["all", "reg", "imm"]:
             print("[!] Usage: pivot [all|reg|imm]")
             print("\tall - Find all stack pivot gadgets (default)")
-            print("\treg - Find register-based pivots (mov esp, <reg>)")
+            print("\treg - Find register-based pivots (mov esp, <reg>, leave)")
             print("\timm - Find immediate value pivots (mov esp, 0x########)")
             return []
         
@@ -962,10 +962,16 @@ class Terminal:
             if not (last_instr == 'ret' or last_instr.startswith('retn') or last_instr == 'iretq'):
                 continue
             
-            # Register-based pivots
+            # Register-based pivots (including leave)
             if mode in ["all", "reg"]:
                 stack_regs = ["rsp", "esp"] if arch == 'x64' else ["esp"]
                 
+                # Check for leave instruction first (simple case)
+                if "leave" in [i.strip().lower() for i in instructions[:-1]]:
+                    results.append(gadget)
+                    continue
+                
+                # Check for mov/xchg register-based pivots
                 for stack_reg in stack_regs:
                     reg_patterns = [
                         rf"mov {stack_reg}, (\w+)",
