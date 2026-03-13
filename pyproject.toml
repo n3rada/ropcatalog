@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "ropcatalog"
-version = "0.9.0"
+version = "0.9.1"
 description = "Finding and classifying ROP gadgets from rp++ output file with some regex and a CLI."
 authors = [
     {name = "n3rada"}
