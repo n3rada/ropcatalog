@@ -19,6 +19,13 @@ from . import gadgets
 from . import formatters
 from . import registers
 
+
+def requires_arg(func):
+    """Decorator that marks a command as requiring at least one argument."""
+    func._requires_arg = True
+    return func
+
+
 class Terminal:
     """
     Manages console commands and dispatches them.
@@ -79,33 +86,33 @@ class Terminal:
 
     def change_style(self, style_name: str = None) -> None:
         """Change output format style (e.g., style python, style cpp)"""
-        
+
         from . import formatters
-        
+
         style_map = {
             "plain": formatters.PlainFormatter,
             "python": formatters.PythonFormatter,
             "cpp": formatters.CppFormatter,
             "js": formatters.JavaScriptFormatter,
         }
-        
+
         if not style_name:
             # Show current style
             current = type(self._formatter).__name__.replace('Formatter', '').lower()
             print(f"[i] Current style: {current}")
             print(f"[i] Available styles: {', '.join(style_map.keys())}")
             return
-        
+
         style_name = style_name.lower()
-        
+
         if style_name not in style_map:
             print(f"[!] Unknown style '{style_name}'")
             print(f"[i] Available styles: {', '.join(style_map.keys())}")
             return
-        
+
         self._formatter = style_map[style_name]()
         print(f"[+] Output style changed to: {style_name}")
-    
+
     def toggle_uniqueness(self, mode: str = None):
         """Toggle uniqueness filtering (uniq on/off)"""
         if not mode:
@@ -127,51 +134,56 @@ class Terminal:
         command_parts = command_input.split(maxsplit=1)
         cmd = command_parts[0].lower()
         args = command_parts[1].strip().lower() if len(command_parts) > 1 else None
-    
+
         if cmd not in self._commands:
             print(f"[!] Unrecognized command '{cmd}'. Type 'help' for available commands.")
             return []
-    
+
+        handler = self._commands[cmd]
+        if getattr(handler, '_requires_arg', False) and args is None:
+            print(f"[!] '{cmd}' requires an argument. Type 'help' for usage.")
+            return []
+
         # Check for /n flag (disable bad op filtering)
         use_full_catalog = False
         if args is not None and args.endswith(" /n"):
             args = args.replace(" /n", "")
             print("[i] Using full catalog (including bad gadgets)")
             use_full_catalog = True
-    
+
         # Check for /v flag (volatile registers only)
         volatile_only = False
         if args is not None and args.endswith(" /v"):
             args = args.replace(" /v", "")
             print("[i] Filtering for volatile registers only (caller-saved)")
             volatile_only = True
-    
+
         # Temporarily swap to full catalog if /n flag present
         if use_full_catalog:
             self._gadgets.use_full_catalog(True)
-        
+
         # Execute the command
         results = self._commands[cmd](args) or []
-    
+
         # Filter for volatile registers if /v flag
         if volatile_only and isinstance(results, list):
             results = [g for g in results if g.uses_only_volatile_regs()]
-    
+
         # Restore clean catalog
         if use_full_catalog:
             self._gadgets.use_full_catalog(False)
-    
+
         # Exit handling
         if cmd == "exit" and results is True:
             raise SystemExit(0)
-    
+
         return results if isinstance(results, list) else []
 
     # Command methods
 
     def show_help(self, fake_arg=None) -> None:
         """Show available commands"""
-        
+
         # Group commands by category
         categories = {
             "General": {
@@ -228,14 +240,14 @@ class Terminal:
                 "funcnop": "Functional NOP sequences for padding/alignment",
             },
         }
-        
+
         for category, commands in categories.items():
             print(f"\n{category}:")
             print("-" * 70)
             for cmd, desc in commands.items():
                 print(f"  {cmd:<10} {desc}")
-        
-        
+
+
         print("\n" + "="*70)
         print("Modifiers:")
         print("  /n           Disable bad operation filtering (show all gadgets)")
@@ -261,11 +273,13 @@ class Terminal:
         """List all gadgets"""
         return self._gadgets
 
+    @requires_arg
     def exact_search(self, instructions: str) -> list:
         """Exact search for gadgets (e.g., ? pop eax ; ret)"""
         print(f"[*] Exact search of '{instructions}'")
         return [g for g in self._gadgets if g.exact_match(instructions)]
 
+    @requires_arg
     def partial_search(self, instructions: str) -> list:
         """Partial search for gadgets (e.g., / pop)"""
 
@@ -290,27 +304,28 @@ class Terminal:
             print("[!] Usage: offset [on|off]")
             print("\tNo argument toggles current state")
 
+    @requires_arg
     def add_to_register(self, args: str = None) -> list:
         """Add register to another register (e.g., add rax rsi OR add rax for any)"""
-        
+
         if not args:
             print("[!] Usage: add <register> [other_register]")
             print("\tExample: add rax rsi  (finds add rax, rsi AND add rsi, rax)")
             print("\tExample: add rax      (finds any add with rax)")
             print("\tNote: For immediates, use 'inc' command")
             return []
-        
+
         parts = args.split()
         reg = parts[0].strip()
         other_reg = parts[1].strip() if len(parts) > 1 else None
-        
+
         if other_reg:
             # Validate other is a register, not an immediate
             if other_reg.startswith("0x") or other_reg.isdigit():
                 print(f"[!] Source '{other_reg}' is an immediate value")
                 print("[i] Use 'inc' for adding immediates (e.g., inc rax)")
                 return []
-            
+
             # Find both directions: add rax, rsi AND add rsi, rax
             print(f"[*] Finding gadgets that add {reg} and {other_reg}")
             patterns = [
@@ -324,49 +339,49 @@ class Terminal:
                 rf"add {reg}, (\w+)",      # add rax, <any>
                 rf"add (\w+), {reg}",      # add <any>, rax
             ]
-        
+
         results = []
         seen = set()  # Avoid duplicates
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     # Avoid duplicates
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # If no specific other_reg, validate it's a register (not immediate)
                     if not other_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
                         # Skip if it's an immediate value
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     # Parse the add instruction: add dest, source
                     parts = matched_instruction.split(',')
                     dest_register = parts[0].strip().split()[-1].strip()  # Register before comma
                     source_register = parts[1].strip() if len(parts) > 1 else None  # Register after comma
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Check destination register (modified by add)
                     dest_modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
                     dest_modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
-                    
+
                     # Check if source register is modified BEFORE the add
                     source_modified_before = False
                     if source_register and registers.is_register(source_register, arch=gadget.arch):
                         source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
-                    
+
                     # Accept only if:
                     # - Destination NOT modified before or after
                     # - Source NOT modified before the add
@@ -374,30 +389,31 @@ class Terminal:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
-    
+
+    @requires_arg
     def sub_from_register(self, args: str = None) -> list:
         """Subtract register from another register (e.g., sub rax rsi OR sub rax for any)"""
-        
+
         if not args:
             print("[!] Usage: sub <register> [other_register]")
             print("\tExample: sub rax rsi  (finds sub rax, rsi AND sub rsi, rax)")
             print("\tExample: sub rax      (finds any sub with rax)")
             print("\tNote: For immediates, use 'dec' command")
             return []
-        
+
         parts = args.split()
         reg = parts[0].strip()
         other_reg = parts[1].strip() if len(parts) > 1 else None
-        
+
         if other_reg:
             # Validate other is a register, not an immediate
             if other_reg.startswith("0x") or other_reg.isdigit():
                 print(f"[!] Source '{other_reg}' is an immediate value")
                 print("[i] Use 'dec' for subtracting immediates (e.g., dec rax)")
                 return []
-            
+
             # Find both directions: sub rax, rsi AND sub rsi, rax
             print(f"[*] Finding gadgets that subtract {reg} and {other_reg}")
             patterns = [
@@ -411,49 +427,49 @@ class Terminal:
                 rf"sub {reg}, (\w+)",      # sub rax, <any>
                 rf"sub (\w+), {reg}",      # sub <any>, rax
             ]
-        
+
         results = []
         seen = set()  # Avoid duplicates
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     # Avoid duplicates
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # If no specific other_reg, validate it's a register (not immediate)
                     if not other_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
                         # Skip if it's an immediate value
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     # Parse the sub instruction: sub dest, source
                     parts = matched_instruction.split(',')
                     dest_register = parts[0].strip().split()[-1].strip()  # Register before comma
                     source_register = parts[1].strip() if len(parts) > 1 else None  # Register after comma
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Check BOTH registers
                     dest_modified_before = gadget.is_register_modified(dest_register, preceding_instructions)
                     dest_modified_after = gadget.is_register_modified(dest_register, remaining_instructions)
-                    
+
                     # Check if source register is modified BEFORE the sub
                     source_modified_before = False
                     if source_register and registers.is_register(source_register, arch=gadget.arch):
                         source_modified_before = gadget.is_register_modified(source_register, preceding_instructions)
-                    
+
                     # Accept only if:
                     # - Destination NOT modified before or after
                     # - Source NOT modified before the sub
@@ -461,30 +477,31 @@ class Terminal:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
 
+    @requires_arg
     def add_to_memory(self, args: str = None) -> list:
         """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any register)"""
-        
+
         if not args:
             print("[!] Usage: addmem <pointer_register> [source_register]")
             print("\tExample: addmem rax rcx  (finds add [rax], rcx)")
             print("\tExample: addmem rax      (finds any add [rax], <reg>)")
             print("\tNote: For increment by constant, use 'incmem' command")
             return []
-        
+
         parts = args.split()
         ptr_reg = parts[0].strip()
         source_reg = parts[1].strip() if len(parts) > 1 else None
-        
+
         if source_reg:
             # Validate source is a register, not an immediate
             if source_reg.startswith("0x") or source_reg.isdigit():
                 print(f"[!] Source '{source_reg}' is an immediate value")
                 print("[i] Use 'incmem' for adding constants (e.g., incmem rax)")
                 return []
-            
+
             print(f"[*] Finding gadgets that add {source_reg} to [{ptr_reg}]")
             patterns = [
                 rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
@@ -499,71 +516,72 @@ class Terminal:
                 rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
             ]
-        
+
         results = []
         seen = set()
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # If no specific source_reg, validate captured source is a REGISTER
                     if not source_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
-                        
+
                         # Skip if it's an immediate value (0x02, 123, etc.)
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
-                        
+
                         # Verify it's actually a valid register
                         if not registers.is_register(candidate, arch=gadget.arch):
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Check pointer register not modified before or after
                     ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
                     ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
-                    
+
                     if not ptr_modified_before and not ptr_modified_after:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
-    
+
+    @requires_arg
     def sub_from_memory(self, args: str = None) -> list:
         """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any register)"""
-        
+
         if not args:
             print("[!] Usage: submem <pointer_register> [source_register]")
             print("\tExample: submem rax rcx  (finds sub [rax], rcx)")
             print("\tExample: submem rax      (finds any sub [rax], <reg>)")
             print("\tNote: For decrement by constant, use 'decmem' command")
             return []
-        
+
         parts = args.split()
         ptr_reg = parts[0].strip()
         source_reg = parts[1].strip() if len(parts) > 1 else None
-        
+
         if source_reg:
             # Validate source is a register, not an immediate
             if source_reg.startswith("0x") or source_reg.isdigit():
                 print(f"[!] Source '{source_reg}' is an immediate value")
                 print("[i] Use 'decmem' for subtracting constants (e.g., decmem rax)")
                 return []
-            
+
             print(f"[*] Finding gadgets that subtract {source_reg} from [{ptr_reg}]")
             patterns = [
                 rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*{source_reg}",
@@ -578,210 +596,212 @@ class Terminal:
                 rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
                 rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(\w+)",
             ]
-        
+
         results = []
         seen = set()
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # If no specific source_reg, validate captured source is a REGISTER
                     if not source_reg and len(match.groups()) > 0:
                         candidate = match.group(1)
-                        
+
                         # Skip if it's an immediate value
                         if candidate.startswith("0x") or candidate.isdigit():
                             continue
-                        
+
                         # Verify it's actually a valid register
                         if not registers.is_register(candidate, arch=gadget.arch):
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
                     ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
-                    
+
                     if not ptr_modified_before and not ptr_modified_after:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
-    
+
+    @requires_arg
     def increment_memory(self, ptr_reg: str) -> list:
         """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <non-zero>)"""
-        
+
         print(f"[*] Finding gadgets that increment [{ptr_reg}]")
-        
+
         patterns = [
             # inc instruction
             rf"inc\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"inc\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            
+
             # add with immediate (hex) - captures the value
             rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
-            
+
             # add with immediate (decimal) - captures the value
             rf"add\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"add\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"add\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"add\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
         ]
-        
+
         results = []
         seen = set()
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # Check if there's a captured immediate value
                     if len(match.groups()) > 0 and match.group(1):
                         imm_str = match.group(1)
-                        
+
                         # Parse the immediate value
                         if imm_str.startswith("0x"):
                             imm_value = int(imm_str, 16)
                         else:
                             imm_value = int(imm_str, 10)
-                        
+
                         # Skip if immediate is zero (no-op)
                         if imm_value == 0:
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
                     ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
-                    
+
                     if not ptr_modified_before and not ptr_modified_after:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
-    
+
+    @requires_arg
     def decrement_memory(self, ptr_reg: str) -> list:
         """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <non-zero>)"""
-        
+
         print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
-        
+
         patterns = [
             # dec instruction
             rf"dec\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
             rf"dec\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\]",
-            
+
             # sub with immediate (hex) - captures the value
             rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
             rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*(0x[0-9a-fA-F]+)",
-            
+
             # sub with immediate (decimal) - captures the value
             rf"sub\s+(?:qword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"sub\s+(?:dword\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"sub\s+(?:word\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
             rf"sub\s+(?:byte\s+)?(?:ptr\s+)?\[{ptr_reg}\],\s*([0-9]+)",
         ]
-        
+
         results = []
         seen = set()
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     gadget_key = (gadget.address, gadget.module)
                     if gadget_key in seen:
                         continue
-                    
+
                     # Check if there's a captured immediate value
                     if len(match.groups()) > 0 and match.group(1):
                         imm_str = match.group(1)
-                        
+
                         # Parse the immediate value
                         if imm_str.startswith("0x"):
                             imm_value = int(imm_str, 16)
                         else:
                             imm_value = int(imm_str, 10)
-                        
+
                         # Skip if immediate is zero (no-op)
                         if imm_value == 0:
                             continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     preceding_instructions = gadget.instructions[:matched_index]
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     ptr_modified_before = gadget.is_register_modified(ptr_reg, preceding_instructions)
                     ptr_modified_after = gadget.is_register_modified(ptr_reg, remaining_instructions)
-                    
+
                     if not ptr_modified_before and not ptr_modified_after:
                         results.append(gadget)
                         seen.add(gadget_key)
                         break
-        
+
         return results
-        
+
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
     def find_ktouser(self, fake_arg=None) -> list:
         """Find kernel->user transition gadgets (swapgs ; iretq)"""
         print("[*] Finding kernel->user transition gadgets (swapgs ; iretq)")
-        
+
         patterns = [
             r"swapgs\s*;\s*iretq",
             r"swapgs\s*;\s*iret",
         ]
-        
+
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
-    
+
     def load_cr(self, reg: str = None) -> list:
         """Find gadgets that load control registers (e.g., loadcr rcx finds mov cr4, rcx)"""
-        
+
         if not reg:
             print("[!] Usage: loadcr <source_register>")
             print("\tExample: loadcr rcx  (finds mov cr4, rcx)")
             print("\tUse: SMEP/SMAP bypass, write protection disable")
             return []
-        
+
         print(f"[*] Finding gadgets that load control registers from {reg}")
-        
+
         # x64 uses full register names (rcx), x86 uses 32-bit (ecx)
         # CR registers are the same across architectures
         patterns = [
@@ -791,45 +811,45 @@ class Terminal:
             rf"mov cr4, {reg}",
             rf"mov cr8, {reg}",   # x64 only, but pattern still safe for x86
         ]
-        
+
         results = []
         for gadget in self._gadgets:
             if any(re.search(p, gadget.raw, re.IGNORECASE) for p in patterns):
                 results.append(gadget)
-        
+
         return results
-    
+
     def find_nop(self, fake_arg=None) -> list:
         """Find TRUE NOP sequences (single-byte NOPs only, no stack manipulation)"""
         print("[*] Finding true NOP sequences")
-        
+
         results = []
-        
+
         for gadget in self._gadgets:
             # Clean split
             instructions = [i.strip() for i in gadget.raw.split(";") if i.strip()]
-            
+
             # Must end with ret
             if not instructions or instructions[-1].strip() != "ret":
                 continue
-            
+
             # All instructions before ret must be simple "nop"
             all_simple_nops = True
             for instr in instructions[:-1]:
                 if instr.strip() != "nop":
                     all_simple_nops = False
                     break
-            
+
             # Need at least one nop
             if all_simple_nops and len(instructions) >= 2:
                 results.append(gadget)
-        
+
         return results
 
     def find_functional_nop(self, fake_arg=None) -> list:
         """Find functional NOP sequences (add rax, 0; mov rax, rax; etc.)"""
         print("[*] Finding functional NOP sequences")
-        
+
         functional_nop_patterns = [
             r"^add\s+\w+,\s*0x0+$",
             r"^add\s+\w+,\s*0$",
@@ -841,15 +861,15 @@ class Terminal:
             r"^lea\s+(\w+),\s*\[\1\]$",
             r"^xchg\s+(\w+),\s*\1$",  # xchg rax, rax (rare but valid NOP)
         ]
-        
+
         results = []
-        
+
         for gadget in self._gadgets:
             instructions = [i.strip() for i in gadget.raw.split(";") if i.strip()]
-            
+
             if not instructions or instructions[-1].strip() != "ret":
                 continue
-            
+
             all_functional_nops = True
             for instr in instructions[:-1]:
                 is_nop = False
@@ -857,20 +877,20 @@ class Terminal:
                     if re.match(pattern, instr.strip(), re.IGNORECASE):
                         is_nop = True
                         break
-                
+
                 if not is_nop:
                     all_functional_nops = False
                     break
-            
+
             if all_functional_nops and len(instructions) >= 2:
                 results.append(gadget)
-        
+
         return results
-    
+
     def find_syscall(self, fake_arg=None) -> list:
         """Find syscall/sysenter gadgets for usermode transitions"""
         print("[*] Finding syscall/sysenter gadgets")
-        
+
         # Match syscall and sysenter instructions
         # syscall is x64, sysenter is x86
         patterns = [
@@ -879,39 +899,40 @@ class Terminal:
             r"\bsysret\b",      # sysret (return from syscall)
             r"\bsysexit\b",     # sysexit (return from sysenter)
         ]
-    
+
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
+    @requires_arg
     def copy_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modification of copied register allowed."""
-        
+
         results = []
-        
+
         print(f"[*] Finding gadgets that copy {reg} register into another one.")
-        
+
         patterns = [
             rf"mov (\w+), {reg}",  # mov <reg>, reg
             rf"lea (\w+), \[{reg}.+?\]",
         ]
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     matched_reg = match.group(1)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
-                    
+
                     # Take only the instructions AFTER the matched one
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Check if the register is modified in the remaining instructions
                     if not gadget.is_register_modified(matched_reg, remaining_instructions):
                         results.append(gadget)
-            
+
             # Check for neg ; sbb ; and pattern
             # Pattern: neg <dest> ; sbb <dest>, <dest> ; and <dest>, <source_reg>
             # This effectively does: dest = source_reg
@@ -919,84 +940,84 @@ class Terminal:
             if re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE):
                 match = re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE)
                 dest_reg = match.group(1)
-                
+
                 # Find the 'and' instruction
                 and_instr = f"and {dest_reg}, {reg}"
                 if and_instr in gadget.instructions:
                     and_index = gadget.instructions.index(and_instr)
                     remaining_instructions = gadget.instructions[and_index + 1:]
-                    
+
                     # Check destination not modified after
                     if not gadget.is_register_modified(dest_reg, remaining_instructions):
                         results.append(gadget)
-            
+
             # Now, handle the 'push <reg>' case
             if f"push {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
                 results.append(gadget)
-        
+
         return results
 
     def stack_pivot(self, args: str = None) -> list:
         """Find stack pivot gadgets (e.g., 'pivot' for all, 'pivot reg' for register-based, 'pivot imm' for immediate values)"""
-        
+
         results = []
         mode = args.strip().lower() if args else "all"
-        
+
         if mode not in ["all", "reg", "imm"]:
             print("[!] Usage: pivot [all|reg|imm]")
             print("\tall - Find all stack pivot gadgets (default)")
             print("\treg - Find register-based pivots (mov esp, <reg>, leave)")
             print("\timm - Find immediate value pivots (mov esp, 0x########)")
             return []
-        
+
         print(f"[*] Finding stack pivot gadgets (mode: {mode})")
-        
+
         for gadget in self._gadgets:
             arch = gadget.arch
-            
+
             # Clean split - strip whitespace AND trailing semicolons
             instructions = [i.strip().rstrip(';').strip() for i in gadget.raw.split(" ; ") if i.strip()]
-            
+
             # Only accept gadgets ending in ret/retn/iretq
             last_instr = instructions[-1].strip().lower()
             if not (last_instr == 'ret' or last_instr.startswith('retn') or last_instr == 'iretq'):
                 continue
-            
+
             # Register-based pivots (including leave)
             if mode in ["all", "reg"]:
                 stack_regs = ["rsp", "esp"] if arch == 'x64' else ["esp"]
-                
+
                 # Check for leave instruction first (simple case)
                 if "leave" in [i.strip().lower() for i in instructions[:-1]]:
                     results.append(gadget)
                     continue
-                
+
                 # Check for mov/xchg register-based pivots
                 for stack_reg in stack_regs:
                     reg_patterns = [
                         rf"mov {stack_reg}, (\w+)",
                         rf"xchg {stack_reg}, (\w+)",
                     ]
-                    
+
                     for i, instr in enumerate(instructions[:-1]):
                         for pattern in reg_patterns:
                             if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                                 source_reg = match.group(1)
-                                
+
                                 if registers.is_register(source_reg, arch=arch):
                                     remaining = instructions[i+1:-1]
-                                    
+
                                     clobbered = any(
                                         re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
                                         re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
                                         re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
                                         for instr in remaining
                                     )
-                                    
+
                                     if not clobbered:
                                         results.append(gadget)
                                         break
-            
+
             # Immediate value pivots
             if mode in ["all", "imm"]:
                 imm_patterns = []
@@ -1007,69 +1028,71 @@ class Terminal:
                     ]
                 else:
                     imm_patterns = [rf"mov esp, (0x[0-9a-fA-F]+)"]
-                
+
                 for i, instr in enumerate(instructions[:-1]):
                     for pattern in imm_patterns:
                         if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                             imm_str = match.group(1)
                             imm_value = int(imm_str, 16)
-                            
+
                             is_reasonable = False
                             if arch == 'x64':
                                 is_reasonable = (imm_value <= 0xFFFFFFFF)
                             else:
                                 is_reasonable = (imm_value >= 0x00010000)
-                            
+
                             if is_reasonable:
                                 remaining = instructions[i+1:-1]
-                                
+
                                 clobbered = any(
                                     re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
                                     re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
                                     re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
                                     for instr in remaining
                                 )
-                                
+
                                 if not clobbered:
                                     results.append(gadget)
                                     break
-        
+
         return results
 
+    @requires_arg
     def write_byte(self, args: str = None) -> list:
         """Write byte to memory pointer (e.g., writebyte rax finds mov byte [rax], <any>)"""
-        
+
         if not args:
             print("[!] Usage: writebyte <pointer_register>")
             print("\tExample: writebyte rax  (finds mov byte [rax], cl)")
             return []
-        
+
         reg = args.strip()
         print(f"[*] Finding gadgets that write a byte to [{reg}]")
-        
+
         # Matches: mov byte [rax], cl / mov byte ptr [rax], 0x00 / mov byte [rax], al
         pattern = rf"mov\s+byte\s+(?:ptr\s+)?\[{reg}\],\s*(\w+)"
-        
+
         results = []
         for gadget in self._gadgets:
             if matches := gadget.pattern_match([pattern]):
                 for match in matches:
                     matched_instruction = match.group(0)
                     source = match.group(1)  # Could be register (cl) or immediate (0x00)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Ensure pointer register isn't clobbered
                     if not gadget.is_register_modified(reg, remaining_instructions):
                         results.append(gadget)
                         break
-        
+
         return results
- 
+
+    @requires_arg
     def copy_to_register(self, reg: str) -> list:
         """Find gadgets that copy into the given register (e.g., r9)"""
 
@@ -1107,6 +1130,7 @@ class Terminal:
         return results
 
 
+    @requires_arg
     def save_register(self, reg: str) -> list:
         """This method finds gadgets that copy the value of a register (e.g., eax) to another register without modifying either register afterward."""
 
@@ -1155,7 +1179,8 @@ class Terminal:
                     results.append(gadget)
 
         return results
-    
+
+    @requires_arg
     def save_to_register(self, reg: str) -> list:
         """Find gadgets that save into the given register without modifying either register afterward."""
 
@@ -1193,6 +1218,7 @@ class Terminal:
         return results
 
 
+    @requires_arg
     def pop_to_register(self, reg: str) -> list:
         """This method finds gadgets that load a value from the stack into a specified register, typically through the pop instruction."""
 
@@ -1225,6 +1251,7 @@ class Terminal:
 
         return results
 
+    @requires_arg
     def push_register(self, reg: str) -> list:
         """This method finds gadgets that push a register onto the stack without any other pop following."""
 
@@ -1263,11 +1290,12 @@ class Terminal:
         # Filter gadgets based on the regex pattern
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
+    @requires_arg
     def increment_register(self, reg: str) -> list:
         """Find gadgets that increment a register (e.g., inc rax OR add rax, <non-zero>)"""
-        
+
         print(f"[*] Finding gadgets that increment {reg}")
-        
+
         patterns = [
             rf"inc {reg}",
             rf"add {reg}, (0x[0-9a-fA-F]+)",  # Capture hex value
@@ -1275,22 +1303,22 @@ class Terminal:
             rf"sub {reg}, (-0x[0-9a-fA-F]+)",  # Negative hex (rarely used)
             rf"lea {reg}, \[{reg}\+(0x[0-9a-fA-F]+)\]",  # Capture offset
         ]
-        
+
         results = []
-        
+
         for gadget in self._gadgets:
             for pattern in patterns:
                 if matches := gadget.pattern_match([pattern]):
                     for match in matches:
                         matched_instruction = match.group(0)
-                        
+
                         if matched_instruction not in gadget.instructions:
                             continue
-                        
+
                         # Check if there's a captured immediate value
                         if len(match.groups()) > 0 and match.group(1):
                             imm_str = match.group(1)
-                            
+
                             # Parse the immediate value
                             if imm_str.startswith("0x"):
                                 imm_value = int(imm_str, 16)
@@ -1298,30 +1326,31 @@ class Terminal:
                                 imm_value = int(imm_str, 16)  # Will be negative
                             else:
                                 imm_value = int(imm_str, 10)
-                            
+
                             # Skip if immediate is zero (no-op)
                             if imm_value == 0:
                                 continue
-                        
+
                         matched_index = gadget.instructions.index(matched_instruction)
-                        
+
                         preceding_instructions = gadget.instructions[:matched_index]
                         remaining_instructions = gadget.instructions[matched_index + 1:]
-                        
+
                         modified_before = gadget.is_register_modified(reg, preceding_instructions)
                         modified_after = gadget.is_register_modified(reg, remaining_instructions)
-                        
+
                         if not modified_before and not modified_after:
                             results.append(gadget)
                             break
-        
+
         return results
 
+    @requires_arg
     def decrement_register(self, reg: str) -> list:
         """Find gadgets that decrement a register (e.g., dec rax OR sub rax, <non-zero>)"""
-        
+
         print(f"[*] Finding gadgets that decrement {reg}")
-        
+
         patterns = [
             rf"dec {reg}",
             rf"sub {reg}, (0x[0-9a-fA-F]+)",    # Capture hex value
@@ -1329,22 +1358,22 @@ class Terminal:
             rf"add {reg}, (-0x[0-9a-fA-F]+)",    # Negative hex
             rf"lea {reg}, \[{reg}\-(0x[0-9a-fA-F]+)\]",  # Capture offset
         ]
-        
+
         results = []
-        
+
         for gadget in self._gadgets:
             for pattern in patterns:
                 if matches := gadget.pattern_match([pattern]):
                     for match in matches:
                         matched_instruction = match.group(0)
-                        
+
                         if matched_instruction not in gadget.instructions:
                             continue
-                        
+
                         # Check if there's a captured immediate value
                         if len(match.groups()) > 0 and match.group(1):
                             imm_str = match.group(1)
-                            
+
                             # Parse the immediate value
                             if imm_str.startswith("0x"):
                                 imm_value = int(imm_str, 16)
@@ -1352,28 +1381,29 @@ class Terminal:
                                 imm_value = int(imm_str, 16)
                             else:
                                 imm_value = int(imm_str, 10)
-                            
+
                             # Skip if immediate is zero (no-op)
                             if imm_value == 0:
                                 continue
-                        
+
                         matched_index = gadget.instructions.index(matched_instruction)
-                        
+
                         preceding_instructions = gadget.instructions[:matched_index]
                         remaining_instructions = gadget.instructions[matched_index + 1:]
-                        
+
                         modified_before = gadget.is_register_modified(reg, preceding_instructions)
                         modified_after = gadget.is_register_modified(reg, remaining_instructions)
-                        
+
                         if not modified_before and not modified_after:
                             results.append(gadget)
                             break
-        
+
         return results
 
+    @requires_arg
     def dereference_register(self, reg: str) -> list:
         """Read from memory (e.g., read rbx finds mov rax, [rbx])"""
-        
+
         print(f"[*] Finding gadgets that read from memory pointed by {reg}")
 
         results = []
@@ -1408,6 +1438,7 @@ class Terminal:
 
         return results
 
+    @requires_arg
     def swap_register(self, reg: str) -> list:
         """Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>)"""
 
@@ -1439,6 +1470,7 @@ class Terminal:
                         results.append(gadget)
         return results
 
+    @requires_arg
     def find_jump_gadgets(self, reg: str) -> list:
         """Find jump-related gadgets (e.g., jmp esp, call esp, jmp [esp+0x10], etc.)"""
         print(f"[*] Finding jump-related gadgets to {reg}")
@@ -1460,132 +1492,137 @@ class Terminal:
 
         return jump_gadgets
 
+    @requires_arg
     def zero(self, reg: str) -> list:
         """Find gadgets that zero the given register"""
-    
+
         print(f"[*] Finding gadgets that zero {reg}")
-    
+
         patterns = [
             rf"xor {reg}, {reg}",
             rf"sub {reg}, {reg}",
             rf"mov {reg}, 0x0+\b",  # mov rax, 0
             rf"and {reg}, 0x0+\b",  # and rax, 0
         ]
-        
+
         results = []
-        
+
         for gadget in self._gadgets:
             for pattern in patterns:
                 if matches := gadget.pattern_match([pattern]):
                     for match in matches:
                         matched_instruction = match.group(0)
-                        
+
                         if matched_instruction not in gadget.instructions:
                             continue
-                        
+
                         matched_index = gadget.instructions.index(matched_instruction)
-                        
+
                         preceding_instructions = gadget.instructions[:matched_index]
                         remaining_instructions = gadget.instructions[matched_index + 1:]
-                        
+
                         modified_before = gadget.is_register_modified(reg, preceding_instructions)
                         modified_after = gadget.is_register_modified(reg, remaining_instructions)
-                        
+
                         if not modified_before and not modified_after:
                             results.append(gadget)
                             break
-        
+
         return results
 
+    @requires_arg
     def write_register_to_memory(self, reg: str = None) -> list:
         """Write register to memory (e.g., write rcx finds mov [<any>], rcx)"""
-        
+
         if not reg:
             print("[!] Usage: write <source_register>")
             print("    Example: write rcx  (finds mov [rax], rcx)")
             return []
-        
+
         print(f"[*] Finding gadgets that write {reg} to memory")
-        
+
         results = []
-        
+
         # Matches: mov [reg], rcx / mov qword [reg], rcx / mov qword ptr [reg], rcx
         # Also matches with offsets: mov [reg+0x10], rcx
         pattern = rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[(\w+)(?:\s*[+\-]\s*0x[0-9a-fA-F]+)?\],\s*{reg}"
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match([pattern]):
                 for match in matches:
                     matched_instruction = match.group(0)
                     ptr_reg = match.group(1)  # The pointer register (rax, rbx, etc.)
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Ensure pointer register isn't clobbered
                     if not gadget.is_register_modified(ptr_reg, remaining_instructions):
                         results.append(gadget)
                         break
-        
+
         return results
 
+    @requires_arg
     def write_to_register(self, reg: str = None) -> list:
         """Write to memory pointed by register (e.g., writeto rax finds mov [rax], <any>)"""
-        
+
         if not reg:
             print("[!] Usage: writeptr <pointer_register>")
             print("    Example: writeptr rax  (finds mov [rax], rcx)")
             return []
-        
+
         print(f"[*] Finding gadgets that write to memory pointed by {reg}")
-        
+
         results = []
-        
+
         # Matches: mov [rax], <any> / mov qword [rax], <any> / mov [rax+0x10], <any>
         patterns = [
             rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[{reg}\],\s*(\w+)",                    # mov [rax], rcx
             rf"mov\s+(?:\w+\s+)?(?:ptr\s+)?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\],\s*(\w+)"  # mov [rax+0x10], rcx
         ]
-        
+
         for gadget in self._gadgets:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
                     source_reg = match.group(1)  # The source register being written
-                    
+
                     # Validate it's actually a register (not an immediate like 0x0)
                     if not registers.is_register(source_reg, arch=gadget.arch):
                         continue
-                    
+
                     if matched_instruction not in gadget.instructions:
                         continue
-                    
+
                     matched_index = gadget.instructions.index(matched_instruction)
                     remaining_instructions = gadget.instructions[matched_index + 1:]
-                    
+
                     # Ensure pointer register isn't clobbered
                     if not gadget.is_register_modified(reg, remaining_instructions):
                         results.append(gadget)
                         break
-        
+
         return results
-    
+
+    @requires_arg
     def indirect_call(self, reg: str) -> list:
         """Indirect call gadgets (e.g., call rax, call [rbx+0x10])"""
-        
+
         print(f"[*] Finding indirect call gadgets for {reg}")
-        
+
         patterns = [
             rf"call {reg}",
             rf"call (?:qword ptr )?\[{reg}\]",
             rf"call (?:qword ptr )?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\]",
         ]
-        
+
         return [g for g in self._gadgets if g.regex(patterns)]
-    
+
+    @requires_arg
     def memory_offset_search(self, arg: str):
         """Search for dereferences with register+offset (e.g., memoff rbx+0x20, or just memoff rbx to match any offset)"""
 
@@ -1613,6 +1650,7 @@ class Terminal:
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
 
+    @requires_arg
     def regex_search(self, pattern: str) -> str:
         """Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)"""
         print(f"[*] Searching with regex '{pattern}'")
