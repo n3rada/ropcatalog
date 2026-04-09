@@ -51,6 +51,7 @@ class Terminal:
             "/": self.partial_search,
             "copy": self.copy_register,
             "copyto": self.copy_to_register,
+            "mov": self.copy_to_register,       # Alias for copyto (mov dest, src)
             "save": self.save_register,
             "saveto": self.save_to_register,
             "add": self.add_to_register,
