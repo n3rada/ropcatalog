@@ -272,7 +272,7 @@ class Terminal:
 
     def list_gadgets(self, fake_arg=None) -> list:
         """List all gadgets"""
-        return self._gadgets
+        return list(self._gadgets)
 
     @requires_arg
     def exact_search(self, instructions: str) -> list:
