@@ -58,7 +58,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "chardet", specifier = ">=5.0.0" },
+    { name = "chardet", specifier = ">=7.0.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.48,<4.0.0" },
 ]
 
