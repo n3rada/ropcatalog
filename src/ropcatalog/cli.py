@@ -54,10 +54,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="The file contains only the offset (e.g., ALSR case).",
     )
+
+    parser.add_argument(
+        "-e",
+        "--encoding",
+        type=str,
+        default=None,
+        required=False,
+        help="File encoding (e.g., utf-8, utf-16). Auto-detected if not set.",
+    )
     return parser
 
 def main() -> int:
-    
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -93,10 +102,10 @@ def main() -> int:
 
     print(f"[+] Found {len(file_paths)} file(s) to parse")
 
-    arch = utils.detect_arch_from_file(file_paths[0])
+    arch = utils.detect_arch_from_file(file_paths[0], encoding=args.encoding)
     print(f"[+] Detected architecture: {arch}")
 
-    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, arch=arch)
+    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, arch=arch, encoding=args.encoding)
 
     if len(catalog) == 0:
         print("[!] No gadgets available, try another module")
@@ -105,7 +114,7 @@ def main() -> int:
     # Filter for unique gadgets if -u flag is set
     if args.unique:
         catalog.set_uniqueness(True)
-    
+
     style_map = {
         "plain": formatters.PlainFormatter,
         "python": formatters.PythonFormatter,
