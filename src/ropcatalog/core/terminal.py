@@ -161,6 +161,8 @@ class Terminal:
                         print(self._formatter.format(gadget, self._with_base_address))
 
                     print(f"---- {len(results)} gadget(s)")
+
+                ctrl_c_count = 0
             except KeyboardInterrupt:
                 # Control-C pressed - check if buffer has text first
                 if session.app.current_buffer.text:

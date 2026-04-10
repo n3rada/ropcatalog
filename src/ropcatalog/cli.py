@@ -11,9 +11,9 @@ from .core import terminal
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="catalog",
+        prog="ropcatalog",
         add_help=True,
-        description="r++ gadget parser for specific instructions.",
+        description="rp++ gadget parser for specific instructions.",
         exit_on_error=True,
     )
 
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--style",
         choices=["plain", "python", "js", "cpp"],
         default="plain",
-        help="Output format style: plain, python, or js.",
+        help="Output format style (default: plain).",
     )
 
 
@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--offset",
         action="store_true",
-        help="The file contains only the offset (e.g., ALSR case).",
+        help="Prefix addresses with base address variable (for ASLR rebasing).",
     )
 
     parser.add_argument(
@@ -73,8 +73,7 @@ def main() -> int:
     bad_chars = None
     if args.bad_characters:
         bad_chars = utils.format_bad_chars(args.bad_characters)
-
-    print(f"[+] Bad characters: {bad_chars}")
+        print(f"[+] Bad characters: {bad_chars}")
 
     # Collect files from both file and directory paths
     file_paths = []
@@ -85,11 +84,7 @@ def main() -> int:
             # Add all files in the directory
             file_paths.extend([file for file in path.iterdir() if file.is_file()])
         elif path.is_file():
-            if path.exists():
-                file_paths.append(path)
-            else:
-                print(f"[!] Path '{path}' does not exist.")
-                return 1
+            file_paths.append(path)
         else:
             print(f"[!] Path '{path}' is not a valid file or directory.")
             return 1
