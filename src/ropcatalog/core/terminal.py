@@ -1517,19 +1517,25 @@ class Terminal:
             if mode in ["all", "reg"]:
                 stack_regs = ["rsp", "esp"] if arch == 'x64' else ["esp"]
 
-                # Check for leave instruction first (simple case)
+                # Check for leave instruction (equivalent to mov esp, ebp ; pop ebp)
                 if "leave" in [i.strip().lower() for i in instructions[:-1]]:
                     results.append(gadget)
                     continue
 
                 # Check for mov/xchg register-based pivots
+                found = False
                 for stack_reg in stack_regs:
+                    if found:
+                        break
+
                     reg_patterns = [
                         rf"mov {stack_reg}, (\w+)",
                         rf"xchg {stack_reg}, (\w+)",
                     ]
 
                     for i, instr in enumerate(instructions[:-1]):
+                        if found:
+                            break
                         for pattern in reg_patterns:
                             if match := re.search(pattern, instr.strip(), re.IGNORECASE):
                                 source_reg = match.group(1)
@@ -1538,14 +1544,15 @@ class Terminal:
                                     remaining = instructions[i+1:-1]
 
                                     clobbered = any(
-                                        re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
-                                        re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
-                                        re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
-                                        for instr in remaining
+                                        re.search(rf"mov (?:rsp|esp),", rem, re.IGNORECASE) or
+                                        re.search(rf"xchg (?:rsp|esp),", rem, re.IGNORECASE) or
+                                        re.search(rf"lea (?:rsp|esp),", rem, re.IGNORECASE)
+                                        for rem in remaining
                                     )
 
                                     if not clobbered:
                                         results.append(gadget)
+                                        found = True
                                         break
 
             # Immediate value pivots
@@ -1575,10 +1582,10 @@ class Terminal:
                                 remaining = instructions[i+1:-1]
 
                                 clobbered = any(
-                                    re.search(rf"\bmov (?:rsp|esp),", instr, re.IGNORECASE) or
-                                    re.search(rf"\bxchg (?:rsp|esp),", instr, re.IGNORECASE) or
-                                    re.search(rf"\blea (?:rsp|esp),", instr, re.IGNORECASE)
-                                    for instr in remaining
+                                    re.search(rf"mov (?:rsp|esp),", rem, re.IGNORECASE) or
+                                    re.search(rf"xchg (?:rsp|esp),", rem, re.IGNORECASE) or
+                                    re.search(rf"lea (?:rsp|esp),", rem, re.IGNORECASE)
+                                    for rem in remaining
                                 )
 
                                 if not clobbered:
