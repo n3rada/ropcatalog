@@ -1,5 +1,6 @@
 # Built-in imports
 import argparse
+import sys
 from pathlib import Path
 
 # Local library imports
@@ -63,12 +64,27 @@ def build_parser() -> argparse.ArgumentParser:
         required=False,
         help="File encoding (e.g., utf-8, utf-16). Auto-detected if not set.",
     )
+
+    parser.add_argument(
+        "-c",
+        "--command",
+        type=str,
+        default=None,
+        required=False,
+        help="Run a single command and exit (e.g., -c 'pivot reg'). Useful for piping output.",
+    )
     return parser
 
 def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+
+    # In command mode, redirect loading messages to stderr so only
+    # gadget output goes to stdout (clean for piping/redirection)
+    if args.command:
+        real_stdout = sys.stdout
+        sys.stdout = sys.stderr
 
     bad_chars = None
     if args.bad_characters:
@@ -117,5 +133,9 @@ def main() -> int:
     formatter = style_map[args.style]()
 
     console = terminal.Terminal(catalog, formatter=formatter, with_base_address=args.offset)
+
+    if args.command:
+        sys.stdout = real_stdout
+        return console.run_command(args.command)
 
     return console.start()

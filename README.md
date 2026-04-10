@@ -2,7 +2,7 @@
 `ropcatalog` is a Python tool designed for parsing and analyzing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It helps identify, classify, and filter useful ROP gadgets.
 
 ```txt
-usage: ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] paths [paths ...]
+usage: ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND] paths [paths ...]
 
 rp++ gadget parser for specific instructions.
 
@@ -19,6 +19,8 @@ options:
   -o, --offset          Prefix addresses with base address variable (for ASLR rebasing).
   -e ENCODING, --encoding ENCODING
                         File encoding (e.g., utf-8, utf-16). Auto-detected if not set.
+  -c COMMAND, --command COMMAND
+                        Run a single command and exit (e.g., -c 'pivot reg'). Useful for piping output.
 ```
 
 It was built during OffSec journey. Primarly for [EXP-301 course](https://www.offsec.com/courses/exp-301/) and then [EXP-401](https://www.offsec.com/courses/exp-401/). These courses focuses on Windows exploit development.
@@ -44,6 +46,12 @@ ropcatalog ~/dump/libeay32IBM019.txt
 Or even directly with a folder containing multiple `rp++` output files:
 ```shell
 ropcatalog.exe .\gadgets\ -o -s cpp
+```
+
+For scripting and piping, use `-c` to run a single command without entering the REPL:
+```shell
+ropcatalog .\fbserver.txt -c "pivot reg" > pivot_gadgets.txt
+ropcatalog .\fbserver.txt -c "pop eax" -s python > pop_eax.py
 ```
 
 ## Quickstart

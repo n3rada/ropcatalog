@@ -3,6 +3,7 @@
 # Built-in imports
 import os
 import re
+import sys
 
 # Third party library imports
 from prompt_toolkit import PromptSession
@@ -180,6 +181,31 @@ class Terminal:
                 return 0
             except re.error:
                 print("[!] Wrongly typed command")
+
+    def run_command(self, command: str) -> int:
+        """Execute a single command and print results to stdout, then exit."""
+        try:
+            # Redirect stdout to stderr during execution so info messages
+            # (e.g., "[*] Finding...") don't pollute piped output
+            real_stdout = sys.stdout
+            sys.stdout = sys.stderr
+            results = self.execute(command)
+            sys.stdout = real_stdout
+        except SystemExit:
+            sys.stdout = real_stdout
+            return 0
+        except re.error:
+            sys.stdout = real_stdout
+            print("[!] Invalid regex in command", file=sys.stderr)
+            return 1
+
+        if results:
+            results = sorted(results, key=gadgets.sort_key, reverse=True)
+            for gadget in results:
+                print(self._formatter.format(gadget, self._with_base_address))
+            print(f"---- {len(results)} gadget(s)", file=sys.stderr)
+
+        return 0
 
     # ──────────────────────────────────────────────────────────────────
     #  General: Help, exit, clear, list, toggles, style
