@@ -18,24 +18,39 @@ def sort_key(gadget: 'Gadget') -> tuple:
 
 
 class Gadget:
-    BAD_OPS = {
-        # Control flow
-        "int3", "loop", "loopne", "jmp", "jz", "je", "jnz", "jne",
-        "ja", "jae", "jna", "jnae", "jb", "jbe", "jnb", "jnbe",
+    UNSTABLE_OPS = {
+        # Conditional jumps (unsigned)
+        "ja", "jae", "jb", "jbe",
+        "jna", "jnae", "jnb", "jnbe",
 
-        # System control
-        "hlt", "cli", "int ", "into",
+        # Conditional jumps (signed)
+        "jg", "jge", "jl", "jle",
+        "jng", "jnge", "jnl", "jnle",
 
-        # I/O operations
+        # Conditional jumps (flags)
+        "jz", "jnz", "je", "jne",
+        "jo", "jno", "js", "jns",
+        "jp", "jnp", "jpe", "jpo",
+
+        # Conditional jumps (counter)
+        "jecxz", "jrcxz",
+
+        # Unconditional control flow
+        "jmp", "loop", "loopne", "loope",
+
+        # Interrupts and traps
+        "int3", "int1", "int ", "into", "ud2",
+
+        # System control (privileged)
+        "hlt", "cli", "sti",
+
+        # I/O operations (privileged)
         "in ", "out ", "ins", "outs",
 
-        # Undefined/trap
-        "ud2", "int1",
-
-        # VM instructions
+        # VM instructions (privileged)
         "vmcall", "vmlaunch", "vmresume", "vmxoff", "vmxon", "vmfunc",
 
-        # Repeat prefixes
+        # Repeat prefixes (unpredictable iteration)
         "rep ", "repe ", "repz ", "repne ", "repnz ",
     }
 
@@ -103,12 +118,12 @@ class Gadget:
 
         return False
 
-    def has_bad_op(self) -> bool:
-        """Check if gadget contains bad operations"""
+    def has_unstable_op(self) -> bool:
+        """Check if gadget contains unstable/unpredictable operations"""
 
-        # Check standard bad ops (without "call")
-        for bad_op in self.BAD_OPS:
-            if bad_op in self._raw:
+        # Check standard unstable ops (without "call")
+        for op in self.UNSTABLE_OPS:
+            if op in self._raw:
                 return True
 
         # Special handling for "call"
@@ -241,7 +256,7 @@ class Gadgets:
         bad_count = 0
         clean_gadgets = []
         for gadget in all_gadgets:
-            if gadget.has_bad_op():
+            if gadget.has_unstable_op():
                 bad_count += 1
             else:
                 clean_gadgets.append(gadget)
@@ -250,9 +265,9 @@ class Gadgets:
         self._active_list = self._filter_unique(clean_gadgets)
 
         print(f"\n[+] Total gadgets loaded: {len(self._full_list)}")
-        print(f"|-> Clean gadgets (filtered): {len(clean_gadgets)}")
+        print(f"|-> Stable gadgets: {len(clean_gadgets)}")
         print(f"|-> Unique gadgets (active): {len(self._active_list)}")
-        print(f"|-> Bad gadgets (removed): {bad_count}")
+        print(f"|-> Unstable gadgets (filtered): {bad_count}")
 
     def use_full_catalog(self, enabled: bool):
         """Temporarily switch between clean and full catalog"""
@@ -261,10 +276,10 @@ class Gadgets:
         else:
             # Restore based on uniqueness mode
             if self._unique_mode:
-                clean_gadgets = [g for g in self._full_list if not g.has_bad_op()]
+                clean_gadgets = [g for g in self._full_list if not g.has_unstable_op()]
                 self._active_list = self._filter_unique(clean_gadgets)
             else:
-                self._active_list = [g for g in self._full_list if not g.has_bad_op()]
+                self._active_list = [g for g in self._full_list if not g.has_unstable_op()]
 
     def __iter__(self):
         return iter(self._active_list)
@@ -282,7 +297,7 @@ class Gadgets:
         self._unique_mode = enabled
 
         # Always start with clean gadgets
-        clean_gadgets = [g for g in self._full_list if not g.has_bad_op()]
+        clean_gadgets = [g for g in self._full_list if not g.has_unstable_op()]
 
         if enabled:
             self._active_list = self._filter_unique(clean_gadgets)  # ✅ Filter unique from CLEAN list
