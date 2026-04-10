@@ -151,7 +151,7 @@ class Terminal:
 
         while True:
             try:
-                command = session.prompt("[ropcatalog]# ").strip() or "help"
+                command = session.prompt(f"[ropcatalog:{len(self._gadgets)}]# ").strip() or "help"
 
                 results = self.execute(command)
 
