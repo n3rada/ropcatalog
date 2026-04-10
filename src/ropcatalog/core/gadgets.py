@@ -225,7 +225,7 @@ class Gadgets:
         self._bad_characters = bad_chars
         self._arch = arch.lower()
         self._encoding = encoding
-        self._unique_mode = False
+        self._unique_mode = True
 
         all_gadgets = []
         for file_path in file_paths:
@@ -247,11 +247,12 @@ class Gadgets:
             else:
                 clean_gadgets.append(gadget)
 
-        # Active list is what's used by iteration
-        self._active_list = clean_gadgets
+        # Active list is what's used by iteration (unique by default)
+        self._active_list = self._filter_unique(clean_gadgets)
 
         print(f"\n[+] Total gadgets loaded: {len(self._full_list)}")
-        print(f"|-> Clean gadgets (filtered): {len(self._active_list)}")
+        print(f"|-> Clean gadgets (filtered): {len(clean_gadgets)}")
+        print(f"|-> Unique gadgets (active): {len(self._active_list)}")
         print(f"|-> Bad gadgets (removed): {bad_count}")
 
     def use_full_catalog(self, enabled: bool):

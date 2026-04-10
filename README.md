@@ -2,7 +2,7 @@
 `ropcatalog` is a Python tool designed for parsing and analyzing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It helps identify, classify, and filter useful ROP gadgets.
 
 ```txt
-usage: catalog [-h] [-b BAD_CHARACTERS] [-u] [-s {plain,python,js,cpp}] [-o] paths [paths ...]
+usage: catalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] paths [paths ...]
 
 r++ gadget parser for specific instructions.
 
@@ -13,7 +13,7 @@ options:
   -h, --help            show this help message and exit
   -b BAD_CHARACTERS, --bad-characters BAD_CHARACTERS
                         A string of characters to exclude in the format '\x00\x0a\x0d'.
-  -u, --unique          Filter for unique gadgets by their raw instruction sequences.
+  -a, --all             Disable default uniqueness filtering (show all duplicate gadgets).
   -s {plain,python,js,cpp}, --style {plain,python,js,cpp}
                         Output format style: plain, python, or js.
   -o, --offset          The file contains only the offset (e.g., ALSR case).
@@ -41,7 +41,7 @@ ropcatalog ~/dump/libeay32IBM019.txt
 
 Or even directly with a folder containing multiple `rp++` output files:
 ```shell
-ropcatalog.exe .\gadgets\ -o -u -s cpp
+ropcatalog.exe .\gadgets\ -o -s cpp
 ```
 
 ## Quickstart
@@ -53,7 +53,7 @@ Dump gadgets using `rp++`:
 ```
 Then, open your catalog with ASLR considerations (`--offset`) and output unique (`-u`) addresses in a copy-pastable Python format (`-s`):
 ```shell
-ropcatalog ~/dump/libeay32IBM019.txt -b "\x00\x09\x0a\x0b\x0c\x0d\x20" -u -o -s python
+ropcatalog ~/dump/libeay32IBM019.txt -b "\x00\x09\x0a\x0b\x0c\x0d\x20" -o -s python
 ```
 
 If you forgot how to browse your own catalog, use `help`

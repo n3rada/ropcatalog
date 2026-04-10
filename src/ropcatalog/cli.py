@@ -33,10 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "-u",
-        "--unique",
+        "-a",
+        "--all",
         action="store_true",
-        help="Filter for unique gadgets by their raw instruction sequences.",
+        help="Disable default uniqueness filtering (show all duplicate gadgets).",
     )
 
     parser.add_argument(
@@ -115,9 +115,9 @@ def main() -> int:
         print("[!] No gadgets available, try another module")
         return 1
 
-    # Filter for unique gadgets if -u flag is set
-    if args.unique:
-        catalog.set_uniqueness(True)
+    # Disable uniqueness if --all flag is set
+    if args.all:
+        catalog.set_uniqueness(False)
 
     style_map = {
         "plain": formatters.PlainFormatter,
