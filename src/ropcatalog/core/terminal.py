@@ -408,13 +408,13 @@ class Terminal:
                 base_reg, offset = reg.split(sep, maxsplit=1)
                 base_reg = base_reg.strip()
                 offset = offset.strip()
-                pattern = rf"mov.*\[\s*{base_reg}\s*{re.escape(sep)}\s*{offset}\s*\],.*"
+                pattern = rf"\[\s*{base_reg}\s*{re.escape(sep)}\s*{offset}\s*\]"
             except ValueError:
                 print("[!] Failed to parse register and offset. Use format: reg+offset or reg-offset")
                 return []
         else:
             # Match any offset off that register: [reg + ...] or [reg - ...]
-            pattern = rf"mov.*\[\s*{reg}\s*[\+\-]\s*.*\],.*"
+            pattern = rf"\[\s*{reg}\s*[\+\-]\s*.*?\]"
 
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
@@ -625,10 +625,11 @@ class Terminal:
                     # Take only the instructions AFTER the matched one
                     remaining_instructions = gadget.instructions[matched_index + 1 :]
 
-                    # Check if the register is modified in the remaining instructions
-
+                    # Check if BOTH registers are preserved after the xchg
                     if not gadget.is_register_modified(
                         matched_reg, remaining_instructions
+                    ) and not gadget.is_register_modified(
+                        reg, remaining_instructions
                     ):
                         results.append(gadget)
         return results
@@ -970,8 +971,8 @@ class Terminal:
         results = []
 
         patterns = [
-            rf"(?:mov|xchg) (\w+), (?:dword )?\[{reg}\]",
-            rf"xchg (?:dword )?\[{reg}\], (\w+)",
+            rf"(?:mov|xchg) (\w+), (?:\w+ )?(?:ptr )?\[{reg}\]",
+            rf"xchg (?:\w+ )?(?:ptr )?\[{reg}\], (\w+)",
         ]
 
         for gadget in self._gadgets:
@@ -1644,8 +1645,8 @@ class Terminal:
 
         patterns = [
             rf"call {reg}",
-            rf"call (?:qword ptr )?\[{reg}\]",
-            rf"call (?:qword ptr )?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\]",
+            rf"call (?:\w+ )?(?:ptr )?\[{reg}\]",
+            rf"call (?:\w+ )?(?:ptr )?\[{reg}\s*[+\-]\s*0x[0-9a-fA-F]+\]",
         ]
 
         return [g for g in self._gadgets if g.regex(patterns)]
