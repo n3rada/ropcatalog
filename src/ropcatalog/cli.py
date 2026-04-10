@@ -97,14 +97,7 @@ def main() -> int:
 
     print(f"[+] Found {len(file_paths)} file(s) to parse")
 
-    encoding = args.encoding
-    if not encoding:
-        encoding = utils.detect_file_encoding(file_paths[0])
-
-    arch = utils.detect_arch_from_file(file_paths[0], encoding=encoding)
-    print(f"[+] Detected architecture: {arch}")
-
-    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, arch=arch, encoding=encoding)
+    catalog = gadgets.Gadgets(file_paths=file_paths, bad_chars=bad_chars, encoding=args.encoding)
 
     if len(catalog) == 0:
         print("[!] No gadgets available, try another module")

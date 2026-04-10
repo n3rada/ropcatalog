@@ -221,9 +221,8 @@ class Gadget:
 
 
 class Gadgets:
-    def __init__(self, file_paths: List[str], bad_chars: list = None, arch: str = 'x86', encoding: str | None = None):
+    def __init__(self, file_paths: List[str], bad_chars: list = None, encoding: str | None = None):
         self._bad_characters = bad_chars
-        self._arch = arch.lower()
         self._encoding = encoding
         self._unique_mode = True
 
@@ -307,10 +306,15 @@ class Gadgets:
 
         start_time = time.time()
 
+        from .utils import detect_file_encoding, detect_arch_from_file
+
         encoding = self._encoding
         if not encoding:
-            from .utils import detect_file_encoding
             encoding = detect_file_encoding(file_path)
+
+        arch = detect_arch_from_file(file_path, encoding=encoding)
+        print(f"[+] Detected architecture: {arch}")
+
         try:
             with open(file_path, mode="r", encoding=encoding) as file_obj:
                 file_content = file_obj.read()
@@ -327,7 +331,7 @@ class Gadgets:
                 address=match.group(1),
                 raw_string=match.group(2).strip().lower(),
                 module=file_path.stem,
-                arch=self._arch,
+                arch=arch,
             )
             if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
                 bad_char_count += 1
