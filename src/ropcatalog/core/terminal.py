@@ -385,7 +385,7 @@ class Terminal:
         return [g for g in self._gadgets if g.partial_match(instructions)]
 
     @requires_arg
-    def regex_search(self, pattern: str) -> str:
+    def regex_search(self, pattern: str) -> list:
         """Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)"""
         print(f"[*] Searching with regex '{pattern}'")
 
@@ -1452,7 +1452,7 @@ class Terminal:
 
         print(f"[*] Finding gadgets that pop onto {reg}")
 
-        patterns = [rf"pop ({reg})", rf"mov ({reg}), [esp]"]
+        patterns = [rf"pop ({reg})", rf"mov ({reg}), \[(?:esp|rsp)\]"]
 
         for gadget in self._gadgets:
 
@@ -1531,6 +1531,8 @@ class Terminal:
                     reg_patterns = [
                         rf"mov {stack_reg}, (\w+)",
                         rf"xchg {stack_reg}, (\w+)",
+                        rf"xchg (\w+), {stack_reg}",
+                        rf"lea {stack_reg}, \[(\w+)",
                     ]
 
                     for i, instr in enumerate(instructions[:-1]):
@@ -1555,16 +1557,24 @@ class Terminal:
                                         found = True
                                         break
 
-            # Immediate value pivots
+            # Immediate value pivots (absolute mov and relative add/sub)
             if mode in ["all", "imm"]:
                 imm_patterns = []
                 if arch == 'x64':
                     imm_patterns = [
                         rf"mov rsp, (0x[0-9a-fA-F]+)",
                         rf"mov esp, (0x[0-9a-fA-F]+)",
+                        rf"add rsp, (0x[0-9a-fA-F]+)",
+                        rf"add esp, (0x[0-9a-fA-F]+)",
+                        rf"sub rsp, (0x[0-9a-fA-F]+)",
+                        rf"sub esp, (0x[0-9a-fA-F]+)",
                     ]
                 else:
-                    imm_patterns = [rf"mov esp, (0x[0-9a-fA-F]+)"]
+                    imm_patterns = [
+                        rf"mov esp, (0x[0-9a-fA-F]+)",
+                        rf"add esp, (0x[0-9a-fA-F]+)",
+                        rf"sub esp, (0x[0-9a-fA-F]+)",
+                    ]
 
                 for i, instr in enumerate(instructions[:-1]):
                     for pattern in imm_patterns:
@@ -1572,8 +1582,14 @@ class Terminal:
                             imm_str = match.group(1)
                             imm_value = int(imm_str, 16)
 
+                            # Determine if it's a relative pivot (add/sub) or absolute (mov)
+                            is_relative = "add " in instr.lower() or "sub " in instr.lower()
+
                             is_reasonable = False
-                            if arch == 'x64':
+                            if is_relative:
+                                # add/sub esp: filter trivial stack cleanups, keep real pivots
+                                is_reasonable = (imm_value >= 0x100)
+                            elif arch == 'x64':
                                 is_reasonable = (imm_value <= 0xFFFFFFFF)
                             else:
                                 is_reasonable = (imm_value >= 0x00010000)
