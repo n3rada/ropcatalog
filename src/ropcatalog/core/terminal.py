@@ -565,12 +565,23 @@ class Terminal:
         return results
 
     @requires_arg
-    def save_to_register(self, reg: str) -> list:
-        """Find gadgets that save into the given register without modifying either register afterward."""
+    def save_to_register(self, args: str) -> list:
+        """Find gadgets that save into the given register without modifying afterward (saveto eax [reg|imm])"""
+
+        parts = args.split()
+        reg = parts[0].strip()
+        mode = parts[1].strip() if len(parts) > 1 else "all"
+
+        if mode not in ["all", "reg", "imm"]:
+            print("[!] Usage: saveto <register> [all|reg|imm]")
+            print("\tall - Find all (default)")
+            print("\treg - Register sources only (mov eax, ecx)")
+            print("\timm - Immediate sources only (mov eax, 0x00000001)")
+            return []
 
         results = []
 
-        print(f"[*] Finding gadgets that save into {reg} without later modification")
+        print(f"[*] Finding gadgets that save into {reg} without later modification (mode: {mode})")
 
         patterns = [
             rf"mov {reg}, (\w+)",
@@ -581,7 +592,15 @@ class Terminal:
             if matches := gadget.pattern_match(patterns):
                 for match in matches:
                     matched_instruction = match.group(0)
-                    source_reg = match.group(1)
+                    source = match.group(1)
+
+                    is_reg = registers.is_register(source, arch=gadget.arch)
+
+                    # Filter by mode
+                    if mode == "reg" and not is_reg:
+                        continue
+                    if mode == "imm" and is_reg:
+                        continue
 
                     if matched_instruction not in gadget.instructions:
                         continue
@@ -589,11 +608,20 @@ class Terminal:
                     matched_index = gadget.instructions.index(matched_instruction)
                     remaining_instructions = gadget.instructions[matched_index + 1:]
 
-                    if not gadget.is_register_modified(reg, remaining_instructions) and \
-                    not gadget.is_register_modified(source_reg, remaining_instructions):
-                        results.append(gadget)
+                    # Destination must not be clobbered after
+                    if gadget.is_register_modified(reg, remaining_instructions):
+                        continue
+
+                    # If source is a register, it must also be preserved after
+                    if is_reg and gadget.is_register_modified(source, remaining_instructions):
+                        continue
+
+                    results.append(gadget)
 
             if f"pop {reg}" in gadget.raw and gadget.verify_push_coherence(reg):
+                # pop is a stack transfer — include in all and reg modes
+                if mode == "imm":
+                    continue
                 matched_index = gadget.instructions.index(f"pop {reg}")
                 remaining_instructions = gadget.instructions[matched_index + 1:]
                 if not gadget.is_register_modified(reg, remaining_instructions):
@@ -1623,9 +1651,9 @@ class Terminal:
         # Define the pattern for jump gadgets
         patterns = [
             rf"jmp {reg}",
-            rf"jmp dword \[{reg}.*\]",
+            rf"jmp (?:\w+ )?(?:ptr )?\[{reg}.*\]",
             rf"call {reg}",
-            rf"call dword \[{reg}.*\]",
+            rf"call (?:\w+ )?(?:ptr )?\[{reg}.*\]",
         ]
 
         # Filter gadgets based on the regex pattern
