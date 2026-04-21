@@ -300,9 +300,9 @@ class Gadgets:
         clean_gadgets = [g for g in self._full_list if not g.has_unstable_op()]
 
         if enabled:
-            self._active_list = self._filter_unique(clean_gadgets)  # ✅ Filter unique from CLEAN list
+            self._active_list = self._filter_unique(clean_gadgets)  # Filter unique from CLEAN list
         else:
-            self._active_list = clean_gadgets  # ✅ Use all CLEAN gadgets
+            self._active_list = clean_gadgets  # Use all CLEAN gadgets
 
         print(f"[+] Uniqueness mode {'enabled' if enabled else 'disabled'} ({len(self._active_list)} gadgets)")
 
