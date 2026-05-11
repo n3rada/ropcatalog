@@ -62,12 +62,14 @@ class TestDispatch:
 class TestSearchCommands:
     @pytest.fixture
     def term(self):
-        return _make_terminal([
-            ("0x1000", "pop eax ; ret"),
-            ("0x1004", "pop ebx ; ret"),
-            ("0x1008", "mov eax, ecx ; ret"),
-            ("0x100c", "xor eax, eax ; ret"),
-        ])
+        return _make_terminal(
+            [
+                ("0x1000", "pop eax ; ret"),
+                ("0x1004", "pop ebx ; ret"),
+                ("0x1008", "mov eax, ecx ; ret"),
+                ("0x100c", "xor eax, eax ; ret"),
+            ]
+        )
 
     def test_exact_search(self, term):
         results = term.execute("? pop eax ; ret")
@@ -91,17 +93,19 @@ class TestSearchCommands:
 class TestRegisterCommands:
     @pytest.fixture
     def term(self):
-        return _make_terminal([
-            ("0x1000", "mov ebx, eax ; ret"),
-            ("0x1004", "mov eax, ecx ; ret"),
-            ("0x1008", "xor eax, eax ; ret"),
-            ("0x100c", "push esp ; pop eax ; ret"),
-            ("0x1010", "xchg eax, ebx ; ret"),
-            ("0x1014", "inc eax ; ret"),
-            ("0x1018", "dec eax ; ret"),
-            ("0x101c", "add eax, ecx ; ret"),
-            ("0x1020", "sub eax, ecx ; ret"),
-        ])
+        return _make_terminal(
+            [
+                ("0x1000", "mov ebx, eax ; ret"),
+                ("0x1004", "mov eax, ecx ; ret"),
+                ("0x1008", "xor eax, eax ; ret"),
+                ("0x100c", "push esp ; pop eax ; ret"),
+                ("0x1010", "xchg eax, ebx ; ret"),
+                ("0x1014", "inc eax ; ret"),
+                ("0x1018", "dec eax ; ret"),
+                ("0x101c", "add eax, ecx ; ret"),
+                ("0x1020", "sub eax, ecx ; ret"),
+            ]
+        )
 
     def test_copy_register(self, term):
         results = term.execute("copy eax")
@@ -131,11 +135,13 @@ class TestRegisterCommands:
 class TestMemoryCommands:
     @pytest.fixture
     def term(self):
-        return _make_terminal([
-            ("0x1000", "mov eax, [ebx] ; ret"),
-            ("0x1004", "mov [eax], ecx ; ret"),
-            ("0x1008", "mov [ebx+0x20], eax ; ret"),
-        ])
+        return _make_terminal(
+            [
+                ("0x1000", "mov eax, [ebx] ; ret"),
+                ("0x1004", "mov [eax], ecx ; ret"),
+                ("0x1008", "mov [ebx+0x20], eax ; ret"),
+            ]
+        )
 
     def test_deref(self, term):
         results = term.execute("deref ebx")
@@ -153,13 +159,15 @@ class TestMemoryCommands:
 class TestStackCommands:
     @pytest.fixture
     def term(self):
-        return _make_terminal([
-            ("0x1000", "pop eax ; ret"),
-            ("0x1004", "pop eax ; pop ebx ; ret"),
-            ("0x1008", "push eax ; ret"),
-            ("0x100c", "xchg eax, esp ; ret"),
-            ("0x1010", "mov esp, eax ; ret"),
-        ])
+        return _make_terminal(
+            [
+                ("0x1000", "pop eax ; ret"),
+                ("0x1004", "pop eax ; pop ebx ; ret"),
+                ("0x1008", "push eax ; ret"),
+                ("0x100c", "xchg eax, esp ; ret"),
+                ("0x1010", "mov esp, eax ; ret"),
+            ]
+        )
 
     def test_pop(self, term):
         results = term.execute("pop eax")
@@ -183,10 +191,12 @@ class TestHelpAndToggles:
         assert "Register Operations" in output
 
     def test_list_returns_all(self):
-        term = _make_terminal([
-            ("0x1000", "pop eax ; ret"),
-            ("0x1004", "pop ebx ; ret"),
-        ])
+        term = _make_terminal(
+            [
+                ("0x1000", "pop eax ; ret"),
+                ("0x1004", "pop ebx ; ret"),
+            ]
+        )
         results = term.execute("list")
         assert len(results) == 2
 
@@ -202,6 +212,7 @@ class TestHelpAndToggles:
         term = _make_terminal([])
         term.execute("style python")
         from ropcatalog.core.formatters import PythonFormatter
+
         assert isinstance(term._formatter, PythonFormatter)
 
 
@@ -210,9 +221,11 @@ class TestRequiresArgDecorator:
         @requires_arg
         def sample_cmd(self, arg):
             pass
+
         assert sample_cmd._requires_arg is True
 
     def test_undecorated_has_no_flag(self):
         def sample_cmd(self, arg):
             pass
-        assert not hasattr(sample_cmd, '_requires_arg')
+
+        assert not hasattr(sample_cmd, "_requires_arg")

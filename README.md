@@ -1,9 +1,9 @@
-# ropcatalog
+# 🔗 ropcatalog
 
 A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for exploit development.
 
 <p align="center">
-    <img src="./images/copy_esp_ASLR.png" alt="copy ESP with ASLR offset in Python format">
+    <img src="./media/copy_esp_ASLR.png" alt="copy ESP with ASLR offset in Python format">
 </p>
 
 Built during OffSec journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development.
@@ -11,7 +11,26 @@ Built during OffSec journey, primarily for the [EXP-301](https://www.offsec.com/
 > [!TIP]
 > Use the `-c` flag to run a single command without entering the REPL. This is useful for piping gadget output directly into files or other tools.
 
-## Installation
+## 🔄 How It Works
+
+```mermaid
+flowchart LR
+    A["rp++ binary dump"] -->|"one or more .txt files"| B["ropcatalog"]
+
+    subgraph ropcatalog
+        B -->|parse| C["Gadget Catalog"]
+        C -->|"filter bad chars\nremove unstable ops\ndeduplicate"| D["Clean Catalog"]
+        D --> E{"-c flag?"}
+        E -->|yes| F["Single Command\n(stdout, pipeable)"]
+        E -->|no| G["Interactive REPL\n(30+ commands)"]
+    end
+
+    G -->|"style flag"| H["Formatted Output"]
+    F -->|"style flag"| H
+    H --> I["Plain / Python / C++ / JS"]
+```
+
+## 📦 Installation
 
 Prefer using [`uv`](https://docs.astral.sh/uv/), a fast Python package manager that installs tools in isolated environments. Alternatively, [`pipx`](https://pypa.github.io/pipx/) or `pip` work as well.
 
@@ -53,7 +72,7 @@ pipx install 'git+https://github.com/n3rada/ropcatalog.git'
 pip install 'git+https://github.com/n3rada/ropcatalog.git'
 ```
 
-## Quickstart
+## ⚡ Quickstart
 
 First, dump gadgets from a target binary using [rp++](https://github.com/0vercl0k/rp):
 
@@ -80,7 +99,7 @@ ropcatalog fbserver.txt -c "pivot reg" > pivot_gadgets.txt
 ropcatalog fbserver.txt -c "pop eax" -s python > pop_eax.py
 ```
 
-## Usage
+## 🧸 Usage
 
 ```
 ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND] paths [paths ...]
@@ -96,11 +115,11 @@ ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENC
 | `-e`, `--encoding` | Force file encoding (auto-detected if not set) |
 | `-c`, `--command` | Run a single command and exit (useful for piping output) |
 
-## REPL Commands
+## 🎮 REPL Commands
 
 Once inside the interactive REPL, the following commands are available. Type `help` for the full list.
 
-### Search
+### 🔍 Search
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -109,7 +128,7 @@ Once inside the interactive REPL, the following commands are available. Type `he
 | `.` | Regex search | `. mov.*rax` |
 | `memoff` | Memory offset search | `memoff rbx+0x20` |
 
-### Register Operations
+### 📝 Register Operations
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -122,7 +141,7 @@ Once inside the interactive REPL, the following commands are available. Type `he
 | `inc` / `dec` | Increment/decrement register | `inc eax` |
 | `add` / `sub` | Register arithmetic | `add rax rsi` |
 
-### Memory Operations
+### 💾 Memory Operations
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -133,7 +152,7 @@ Once inside the interactive REPL, the following commands are available. Type `he
 | `addmem` / `submem` | Add/subtract memory value | `addmem rax rcx` |
 | `incmem` / `decmem` | Increment/decrement memory | `incmem rax` |
 
-### Stack and Control Flow
+### 🔀 Stack and Control Flow
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -147,7 +166,7 @@ Once inside the interactive REPL, the following commands are available. Type `he
 | `nop` / `funcnop` | NOP/functional NOP padding | `nop` |
 | `loadcr` | Load control register | `loadcr rcx` |
 
-### Modifiers
+### 🏷️ Modifiers
 
 Append these flags to any command:
 
@@ -158,7 +177,7 @@ Append these flags to any command:
 
 Both flags can be combined: `copy rax /v /n`
 
-## Output Styles
+## 🎨 Output Styles
 
 The `--style` flag (or `style` REPL command) controls how gadgets are formatted for copy-paste into exploits:
 
@@ -184,9 +203,9 @@ writePtr(ropBuffer + ropIndex * 8, 0x10001000); ropIndex++; // pop eax ; ret [li
 
 With `--offset`, addresses are prefixed with a base address variable for ASLR rebasing:
 
-![copy ESP with ASLR offset](./images/copy_esp_ASLR.png)
+![copy ESP with ASLR offset](./media/copy_esp_ASLR.png)
 
-## Stability Filtering
+## 🛡️ Stability Filtering
 
 By default, `ropcatalog` filters out gadgets containing unstable operations that would break a ROP chain:
 
@@ -198,18 +217,31 @@ By default, `ropcatalog` filters out gadgets containing unstable operations that
 
 Use the `/n` modifier to temporarily include filtered gadgets in search results.
 
-## Screenshots
+## 📸 Screenshots
 
 Searching for gadgets that dereference `ESI`:
 
-![deref esi](./images/deref_esi.png)
+![deref esi](./media/deref_esi.png)
 
 Searching for gadgets that zero `EAX`:
 
-![zero eax](./images/zero_eax.png)
+![zero eax](./media/zero_eax.png)
 
-## Disclaimer
+## ⚠️ Disclaimer
 
-**This tool is provided for defensive security research, education, and authorized penetration testing.** It is designed to assist security professionals during Windows exploit development courses and authorized engagements.
+**This tool is provided strictly for defensive security research, education, and authorized penetration testing.** You must have **explicit written authorization** before running this software against any system you do not own.
 
-Misuse of this tool against systems without explicit authorization is prohibited and may violate applicable laws.
+This tool is designed for educational purposes only and is intended to assist security professionals during Windows exploit development courses and authorized engagements.
+
+Acceptable environments include:
+- Private lab environments you control (local VMs, isolated networks).
+- Sanctioned learning platforms (CTFs, Hack The Box, OffSec exam scenarios).
+- Formal penetration-test or red-team engagements with documented customer consent.
+
+Misuse of this project may result in legal action.
+
+## ⚖️ Legal Notice
+
+Any unauthorized use of this tool in real-world environments or against systems without explicit permission from the system owner is strictly prohibited and may violate legal and ethical standards. The creators and contributors of this tool are not responsible for any misuse or damage caused.
+
+Use responsibly and ethically. Always respect the law and obtain proper authorization.

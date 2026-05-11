@@ -111,24 +111,30 @@ class TestPatternMatch:
 
 
 class TestUnstableOps:
-    @pytest.mark.parametrize("raw", [
-        "jmp eax ; ret",
-        "int3 ; ret",
-        "hlt ; ret",
-        "jz label ; ret",
-        "loop start ; ret",
-    ])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "jmp eax ; ret",
+            "int3 ; ret",
+            "hlt ; ret",
+            "jz label ; ret",
+            "loop start ; ret",
+        ],
+    )
     def test_unstable_ops_detected(self, make_gadget, raw):
         g = make_gadget(raw=raw)
         assert g.has_unstable_op() is True
 
-    @pytest.mark.parametrize("raw", [
-        "pop eax ; ret",
-        "mov eax, ecx ; ret",
-        "xor eax, eax ; ret",
-        "add eax, ecx ; ret",
-        "nop ; ret",
-    ])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "pop eax ; ret",
+            "mov eax, ecx ; ret",
+            "xor eax, eax ; ret",
+            "add eax, ecx ; ret",
+            "nop ; ret",
+        ],
+    )
     def test_stable_ops(self, make_gadget, raw):
         g = make_gadget(raw=raw)
         assert g.has_unstable_op() is False
