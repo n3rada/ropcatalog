@@ -1,4 +1,4 @@
-# 🔗 ropcatalog
+# 📖 ropcatalog
 
 A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for exploit development.
 
