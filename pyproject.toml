@@ -1,10 +1,10 @@
 [build-system]
-requires = ["uv_build"]
+requires = ["uv_build>=0.11.8,<0.12"]
 build-backend = "uv_build"
 
 [project]
 name = "ropcatalog"
-version = "0.9.2"
+version = "0.9.3"
 description = "Finding and classifying ROP gadgets from rp++ output file with some regex and a CLI."
 authors = [
     {name = "n3rada"}
@@ -22,3 +22,9 @@ repository = "https://github.com/n3rada/ropcatalog"
 
 [project.scripts]
 ropcatalog = "ropcatalog.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
