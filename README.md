@@ -11,25 +11,6 @@ Built during OffSec journey, primarily for the [EXP-301](https://www.offsec.com/
 > [!TIP]
 > Use the `-c` flag to run a single command without entering the REPL. This is useful for piping gadget output directly into files or other tools.
 
-## 🔄 How It Works
-
-```mermaid
-flowchart LR
-    A["rp++ binary dump"] -->|"one or more .txt files"| B["ropcatalog"]
-
-    subgraph ropcatalog
-        B -->|parse| C["Gadget Catalog"]
-        C -->|"filter bad chars\nremove unstable ops\ndeduplicate"| D["Clean Catalog"]
-        D --> E{"-c flag?"}
-        E -->|yes| F["Single Command\n(stdout, pipeable)"]
-        E -->|no| G["Interactive REPL\n(30+ commands)"]
-    end
-
-    G -->|"style flag"| H["Formatted Output"]
-    F -->|"style flag"| H
-    H --> I["Plain / Python / C++ / JS"]
-```
-
 ## 📦 Installation
 
 Prefer using [`uv`](https://docs.astral.sh/uv/), a fast Python package manager that installs tools in isolated environments. Alternatively, [`pipx`](https://pypa.github.io/pipx/) or `pip` work as well.
