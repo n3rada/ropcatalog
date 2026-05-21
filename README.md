@@ -210,7 +210,7 @@ Searching for gadgets that zero `EAX`:
 
 ## ⚠️ Disclaimer
 
-**This tool is provided strictly for defensive security research, education, and authorized penetration testing.** You must have **explicit written authorization** before running this software against any system you do not own.
+**This tool is provided strictly for security research, education, and authorized penetration testing.** You must have **explicit written authorization** before running this software against any system you do not own.
 
 This tool is designed for educational purposes only and is intended to assist security professionals during Windows exploit development courses and authorized engagements.
 
