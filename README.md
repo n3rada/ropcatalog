@@ -6,7 +6,7 @@ A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Progr
     <img src="./media/copy_esp_ASLR.png" alt="ropcatalog: copy ESP with ASLR offset in Python format">
 </p>
 
-Built during an OffSec journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and ROP chain construction.
+Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and [ROP chain](https://en.wikipedia.org/wiki/Return-oriented_programming) construction.
 
 - **Gadget search**: exact, partial, regex, and semantic commands (`copy`, `pivot`, `zero`, `pop`, `syscall`, and more)
 - **ASLR support**: `--offset` mode prefixes all addresses with a base variable for dynamic rebase at runtime
