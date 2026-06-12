@@ -11,7 +11,7 @@ Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EX
 - **Gadget search**: exact, partial, regex, and semantic commands (`copy`, `pivot`, `zero`, `pop`, `syscall`, and more)
 - **ASLR support**: `--offset` mode prefixes all addresses with a base variable for dynamic rebase at runtime
 - **Bad character filtering**: exclude gadgets whose addresses contain bytes that break the exploit
-- **Output styles**: `plain`, `python`, `cpp`, `js` — copy-paste directly into your exploit code
+- **Output styles**: `plain`, `python`, `cpp`, `js` for copy-paste directly into your exploit code
 - **Stability filtering**: automatically removes gadgets with jumps, interrupts, or large stack shifts that would break a ROP chain
 - **Multi-file**: point at a single rp++ output file or an entire directory of gadget dumps
 
