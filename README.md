@@ -1,12 +1,19 @@
 # 📖 ropcatalog
 
-A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for exploit development.
+A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for Windows exploit development and binary exploitation.
 
 <p align="center">
-    <img src="./media/copy_esp_ASLR.png" alt="copy ESP with ASLR offset in Python format">
+    <img src="./media/copy_esp_ASLR.png" alt="ropcatalog: copy ESP with ASLR offset in Python format">
 </p>
 
-Built during OffSec journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development.
+Built during an OffSec journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and ROP chain construction.
+
+- **Gadget search**: exact, partial, regex, and semantic commands (`copy`, `pivot`, `zero`, `pop`, `syscall`, and more)
+- **ASLR support**: `--offset` mode prefixes all addresses with a base variable for dynamic rebase at runtime
+- **Bad character filtering**: exclude gadgets whose addresses contain bytes that break the exploit
+- **Output styles**: `plain`, `python`, `cpp`, `js` — copy-paste directly into your exploit code
+- **Stability filtering**: automatically removes gadgets with jumps, interrupts, or large stack shifts that would break a ROP chain
+- **Multi-file**: point at a single rp++ output file or an entire directory of gadget dumps
 
 > [!TIP]
 > Use the `-c` flag to run a single command without entering the REPL. This is useful for piping gadget output directly into files or other tools.
