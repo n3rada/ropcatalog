@@ -1,6 +1,10 @@
 # Built-in imports
 import argparse
+import io
+import json
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # Local library imports
@@ -8,6 +12,13 @@ from .core import gadgets
 from .core import utils
 from .core import formatters
 from .core import terminal
+
+
+@dataclass(frozen=True)
+class Query:
+    identifier: str
+    command: str
+    raw_gadget: bool = False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,18 +84,179 @@ def build_parser() -> argparse.ArgumentParser:
         required=False,
         help="Run a single command and exit (e.g., -c 'pivot reg'). Useful for piping output.",
     )
+    parser.add_argument(
+        "-q",
+        "--query",
+        action="append",
+        default=[],
+        help="Run a query and exit. Repeat to execute multiple queries.",
+    )
+    parser.add_argument(
+        "--batch",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Read newline-delimited queries from PATH, or '-' for standard input.",
+    )
+    parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Emit one JSON object per query to stdout, suitable for jq pipelines or agents.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Return at most this many gadgets per query.",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        type=Path,
+        default=None,
+        help="Write JSONL to <module>.ropcatalog.jsonl files instead of stdout.",
+    )
     return parser
+
+
+def parse_batch_queries(path: str) -> list[Query]:
+    if path == "-":
+        lines = sys.stdin
+    else:
+        try:
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            raise ValueError(f"cannot read batch file '{path}': {error}") from error
+
+    queries = []
+    for line_number, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("{"):
+            try:
+                request = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"invalid JSON on batch line {line_number}: {error.msg}") from error
+            if not isinstance(request, dict):
+                raise ValueError(f"batch line {line_number} must be a JSON object")
+            has_query = "query" in request
+            has_command = "command" in request
+            if has_query == has_command:
+                raise ValueError(
+                    f"batch line {line_number} requires exactly one of 'query' or 'command'"
+                )
+            command = request["query"] if has_query else request["command"]
+            identifier = request.get("id", line_number)
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError(f"batch line {line_number} requires a non-empty query or command")
+            raw_gadget = has_query
+        else:
+            command = line
+            identifier = line_number
+            raw_gadget = True
+        queries.append(Query(str(identifier), command.strip(), raw_gadget))
+    return queries
+
+
+def gadget_to_record(gadget, formatter, with_base_address: bool) -> dict:
+    return {
+        "module": gadget.module,
+        "address": gadget.address,
+        "arch": gadget.arch,
+        "instructions": gadget.instructions,
+        "raw": gadget.raw,
+        "formatted": formatter.format(gadget, with_base_address),
+    }
+
+
+def execute_queries(
+    console,
+    queries,
+    formatter,
+    with_base_address: bool,
+    limit: int | None,
+    diagnostics_stream=sys.stderr,
+) -> list[dict]:
+    records = []
+    for query in queries:
+        console_input = query.command
+        if query.raw_gadget and not query.command.startswith("?"):
+            console_input = f"? {query.command}"
+        real_stdout = sys.stdout
+        try:
+            sys.stdout = diagnostics_stream
+            results = console.execute(console_input)
+        except (re.error, SystemExit) as error:
+            print(f"[!] Query '{query.identifier}' failed: {error}", file=sys.stderr)
+            results = []
+        finally:
+            sys.stdout = real_stdout
+
+        results = sorted(results, key=gadgets.sort_key, reverse=True)
+        total = len(results)
+        if limit is not None:
+            results = results[:limit]
+        records.append({
+            "schema": "ropcatalog.query.v1",
+            "id": query.identifier,
+            "query": query.command,
+            "count": len(results),
+            "total": total,
+            "gadgets": [
+                gadget_to_record(gadget, formatter, with_base_address)
+                for gadget in results
+            ],
+        })
+    return records
+
+
+def write_jsonl(records: list[dict], stream) -> None:
+    for record in records:
+        print(json.dumps(record, separators=(",", ":"), sort_keys=True), file=stream)
+
+
+def write_module_artifacts(records: list[dict], artifact_dir: Path, modules: set[str]) -> list[Path]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for module in sorted(modules):
+        safe_module = re.sub(r"[^A-Za-z0-9_.-]", "_", module)
+        path = artifact_dir / f"{safe_module}.ropcatalog.jsonl"
+        module_records = []
+        for record in records:
+            module_record = dict(record)
+            module_record["module"] = module
+            module_record["gadgets"] = [
+                gadget for gadget in record["gadgets"] if gadget["module"] == module
+            ]
+            module_record["count"] = len(module_record["gadgets"])
+            module_records.append(module_record)
+        with path.open("w", encoding="utf-8") as stream:
+            write_jsonl(module_records, stream)
+        paths.append(path)
+    return paths
+
 
 def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
 
+    noninteractive = bool(args.command or args.query or args.batch)
+    if args.command and (args.query or args.batch):
+        parser.error("--command cannot be combined with --query or --batch")
+    if args.jsonl and not noninteractive:
+        parser.error("--jsonl requires --command, --query, or --batch")
+    if args.artifact_dir and (not args.jsonl or not noninteractive):
+        parser.error("--artifact-dir requires JSONL non-interactive mode")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be greater than zero")
+
     # In command mode, redirect loading messages to stderr so only
     # gadget output goes to stdout (clean for piping/redirection)
-    if args.command:
+    if noninteractive:
         real_stdout = sys.stdout
-        sys.stdout = sys.stderr
+        diagnostics_stream = io.StringIO() if args.artifact_dir else sys.stderr
+        sys.stdout = diagnostics_stream
 
     bad_chars = None
     if args.bad_characters:
@@ -134,8 +306,48 @@ def main() -> int:
 
     console = terminal.Terminal(catalog, formatter=formatter, with_base_address=args.offset)
 
-    if args.command:
+    if noninteractive:
         sys.stdout = real_stdout
+
+    if args.command and not args.jsonl and args.limit is None:
         return console.run_command(args.command)
+
+    queries = []
+    if args.command:
+        queries.append(Query("1", args.command))
+    queries.extend(
+        Query(str(index), query, True)
+        for index, query in enumerate(args.query, len(queries) + 1)
+    )
+    if args.batch:
+        try:
+            queries.extend(parse_batch_queries(args.batch))
+        except ValueError as error:
+            print(f"[!] {error}", file=sys.stderr)
+            return 1
+
+    if queries:
+        records = execute_queries(
+            console,
+            queries,
+            formatter,
+            args.offset,
+            args.limit,
+            diagnostics_stream,
+        )
+        if args.jsonl:
+            if args.artifact_dir:
+                modules = {gadget.module for gadget in catalog.gadgets}
+                for path in write_module_artifacts(records, args.artifact_dir, modules):
+                    print(f"[+] Wrote {len(records)} query result(s): {path}", file=sys.stderr)
+            else:
+                write_jsonl(records, sys.stdout)
+        else:
+            for record in records:
+                print(f"== [{record['id']}] {record['query']} ==")
+                for gadget in record["gadgets"]:
+                    print(gadget["formatted"])
+                print(f"---- {record['count']} gadget(s)", file=sys.stderr)
+        return 0
 
     return console.start()

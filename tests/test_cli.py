@@ -2,8 +2,11 @@
 
 """Tests for the CLI argument parser."""
 
+import json
+import sys
+
 import pytest
-from ropcatalog.cli import build_parser
+from ropcatalog.cli import build_parser, main, parse_batch_queries
 
 
 class TestBuildParser:
@@ -76,6 +79,19 @@ class TestBuildParser:
         args = parser.parse_args(["gadgets.txt"])
         assert args.command is None
 
+    def test_repeatable_queries(self, parser):
+        args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "-q", "pivot reg"])
+        assert args.query == ["pop rdi", "pivot reg"]
+
+    def test_batch_and_jsonl(self, parser):
+        args = parser.parse_args(["gadgets.txt", "--batch", "queries.txt", "--jsonl"])
+        assert args.batch == "queries.txt"
+        assert args.jsonl is True
+
+    def test_artifact_dir(self, parser, tmp_path):
+        args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "--jsonl", "--artifact-dir", str(tmp_path)])
+        assert args.artifact_dir == tmp_path
+
     def test_combined_args(self, parser):
         args = parser.parse_args([
             "gadgets.txt", "other.txt",
@@ -97,3 +113,63 @@ class TestBuildParser:
     def test_no_paths_fails(self, parser):
         with pytest.raises(SystemExit):
             parser.parse_args([])
+
+
+class TestBatchMode:
+    def test_parses_raw_and_semantic_queries(self, tmp_path):
+        batch = tmp_path / "queries.jsonl"
+        batch.write_text(
+            "# ignored\n\npop rdi ; ret\n"
+            '{"id":"pivot","command":"pivot reg"}\n',
+            encoding="utf-8",
+        )
+
+        queries = parse_batch_queries(str(batch))
+
+        assert [(query.identifier, query.command) for query in queries] == [
+            ("3", "pop rdi ; ret"),
+            ("pivot", "pivot reg"),
+        ]
+        assert [query.raw_gadget for query in queries] == [True, False]
+
+    def test_json_query_requires_one_mode(self, tmp_path):
+        batch = tmp_path / "queries.jsonl"
+        batch.write_text('{"query":"ret","command":"pivot rsp"}\n', encoding="utf-8")
+
+        with pytest.raises(ValueError, match="exactly one"):
+            parse_batch_queries(str(batch))
+
+    def test_jsonl_module_artifact_suppresses_stdout(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libphp.so.txt"
+        catalog.write_text(
+            "FileFormat: ELF, Arch: x64\n"
+            "0x194fc5: pop rdi ; ret\n"
+            "0x123456: pop rdi ; pop rbp ; ret\n",
+            encoding="utf-8",
+        )
+        artifacts = tmp_path / "artifacts"
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog",
+            str(catalog),
+            "-q", "pop rdi ; ret",
+            "-q", "? pop rdi ; ret",
+            "--jsonl",
+            "--limit", "1",
+            "--artifact-dir", str(artifacts),
+        ])
+
+        assert main() == 0
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+        artifact = artifacts / "libphp.so.ropcatalog.jsonl"
+        assert captured.err == f"[+] Wrote 2 query result(s): {artifact}\n"
+        assert artifact.is_file()
+        artifact_records = [json.loads(line) for line in artifact.read_text().splitlines()]
+        assert artifact_records[0]["schema"] == "ropcatalog.query.v1"
+        assert artifact_records[0]["count"] == 1
+        assert artifact_records[0]["total"] == 1
+        assert artifact_records[0]["gadgets"][0]["module"] == "libphp.so"
+        assert artifact_records[0]["gadgets"][0]["arch"] == "x64"
+        assert artifact_records[1]["query"] == "? pop rdi ; ret"
