@@ -1,5 +1,7 @@
 # ropcatalog/core/terminal.py
 
+from __future__ import annotations
+
 # Built-in imports
 import os
 import re

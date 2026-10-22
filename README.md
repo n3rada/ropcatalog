@@ -25,6 +25,8 @@ Install from GitHub with `uv`:
 uv tool install git+https://github.com/n3rada/ropcatalog.git
 ```
 
+Python 3.10 or later is required.
+
 Or run it once without installing:
 
 ```shell

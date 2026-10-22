@@ -10,7 +10,7 @@ def test_production_callables_have_complete_docstrings_and_types():
     failures = []
     for path in sorted(SOURCE_ROOT.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path), feature_version=(3, 11))
+        tree = ast.parse(source, filename=str(path), feature_version=(3, 10))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

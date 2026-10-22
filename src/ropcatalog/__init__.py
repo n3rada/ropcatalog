@@ -1,6 +1,6 @@
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
-import tomllib
+import re
 
 try:
     __version__ = version("ropcatalog")
@@ -8,10 +8,13 @@ except PackageNotFoundError:
     # Fallback: read directly from pyproject.toml for development
     try:
         pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
-        with open(pyproject_path, "rb") as f:
-            pyproject_data = tomllib.load(f)
-            __version__ = pyproject_data["project"]["version"] + "-dev"
-    except (FileNotFoundError, KeyError):
+        version_match = re.search(
+            r'^version\s*=\s*"([^"]+)"\s*$',
+            pyproject_path.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        __version__ = version_match.group(1) + "-dev"
+    except (AttributeError, FileNotFoundError):
         __version__ = "unknown"
 
 __all__ = ["__version__"]
