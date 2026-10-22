@@ -72,6 +72,14 @@ class TestBuildParser:
         args = parser.parse_args(["gadgets.txt"])
         assert args.encoding is None
 
+    def test_virtual_addresses_cannot_use_offset(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", "--address-kind", "va", "--offset"])
+
+    def test_stdin_module_requires_stdin(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", "--stdin-module", "libc.so.6"])
+
     def test_command(self, parser):
         args = parser.parse_args(["gadgets.txt", "-c", "pivot reg"])
         assert args.command == "pivot reg"
@@ -92,6 +100,26 @@ class TestBuildParser:
     def test_artifact_dir(self, parser, tmp_path):
         args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "--jsonl", "--artifact-dir", str(tmp_path)])
         assert args.artifact_dir == tmp_path
+
+    def test_catalog_out(self, parser, tmp_path):
+        args = parser.parse_args(["gadgets.txt", "--catalog-out", str(tmp_path / "lib.ropcatalog")])
+        assert args.catalog_out == tmp_path / "lib.ropcatalog"
+
+    def test_capabilities_requires_no_path(self, parser):
+        args = parser.parse_args(["--capabilities"])
+        assert args.capabilities is True
+
+    def test_serve(self, parser):
+        args = parser.parse_args(["gadgets.ropcatalog", "--serve"])
+        assert args.serve is True
+
+    def test_fields_requires_machine_output(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", "-q", "ret", "--fields", "id,address"])
+
+    def test_catalog_out_rejects_query_options(self, parser, tmp_path):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", "-q", "ret", "--catalog-out", str(tmp_path / "catalog")])
 
     @pytest.mark.parametrize("query_modes", [
         ["-c", "pivot reg", "-q", "pop rdi ; ret"],
@@ -174,6 +202,22 @@ class TestBatchMode:
         assert records[0]["gadgets"][0]["address"] == "0xf39fa"
         assert records[0]["gadgets"][0]["arch"] == "x64"
 
+    def test_ropper_stdin_jsonl(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(
+            "\x1b[36m0x000000000011b9fa\x1b[0m: pop rdi; ret;\n"
+        ))
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", "--stdin-module", "libc.so.6", "--address-kind", "rva",
+            "-q", "pop rdi ; ret", "--jsonl",
+        ])
+
+        assert main() == 0
+
+        record = json.loads(capsys.readouterr().out)
+        assert record["gadgets"][0]["module"] == "libc.so.6"
+        assert record["gadgets"][0]["address_kind"] == "rva"
+        assert record["gadgets"][0]["raw"] == "pop rdi ; ret"
+
     def test_parses_raw_and_semantic_queries(self, tmp_path):
         batch = tmp_path / "queries.jsonl"
         batch.write_text(
@@ -231,3 +275,107 @@ class TestBatchMode:
         assert artifact_records[0]["gadgets"][0]["module"] == "libphp.so"
         assert artifact_records[0]["gadgets"][0]["arch"] == "x64"
         assert artifact_records[1]["query"] == "? pop rdi ; ret"
+
+    def test_jsonl_ranks_low_side_effect_gadget_first(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libc.txt"
+        catalog.write_text(
+            "FileFormat: ELF, Arch: x64\n"
+            "0x1: pop rdi ; pop rbx ; ret\n"
+            "0x2: pop rdi ; ret\n"
+            "0x3: pop rdi ; call rax\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", str(catalog), "-c", "pop rdi", "--jsonl", "--limit", "1",
+        ])
+
+        assert main() == 0
+
+        record = json.loads(capsys.readouterr().out)
+        assert record["gadgets"][0]["raw"] == "pop rdi ; ret"
+        assert record["gadgets"][0]["semantics"]["stack_delta"] == 16
+
+    def test_constraints_explain_rejection(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libc.txt"
+        catalog.write_text("0x1: pop rdi ; ret\n", encoding="utf-8")
+        batch = tmp_path / "query.jsonl"
+        batch.write_text(
+            '{"command":"pop rdi","constraints":{"require_writes":"rax"}}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", str(catalog), "--batch", str(batch), "--jsonl",
+        ])
+
+        assert main() == 0
+
+        record = json.loads(capsys.readouterr().out)
+        assert record["failure"] == "constraints_rejected_all"
+        assert record["rejections"] == {"required_write": 1}
+        assert record["alternatives"][0]["rejected_by"] == ["required_write"]
+
+    def test_reusable_catalog_round_trip(self, tmp_path, monkeypatch, capsys):
+        source = tmp_path / "libc.txt"
+        source.write_text("FileFormat: ELF, Arch: x64\n0x2: pop rdi ; ret\n", encoding="utf-8")
+        catalog = tmp_path / "libc.ropcatalog"
+        monkeypatch.setattr(sys, "argv", ["ropcatalog", str(source), "--catalog-out", str(catalog)])
+        assert main() == 0
+        capsys.readouterr()
+
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", str(catalog), "-q", "pop rdi ; ret", "--jsonl", "--fields", "id,address,raw",
+        ])
+        assert main() == 0
+
+        record = json.loads(capsys.readouterr().out)
+        assert record["gadgets"] == [{
+            "id": record["gadgets"][0]["id"],
+            "address": "0x2",
+            "raw": "pop rdi ; ret",
+        }]
+
+    def test_plan_auto_preserves_prior_values(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libc.txt"
+        catalog.write_text(
+            "FileFormat: ELF, Arch: x64\n"
+            "0x1: pop rdi ; ret\n"
+            "0x2: pop rsi ; pop rdi ; ret\n"
+            "0x3: pop rsi ; ret\n",
+            encoding="utf-8",
+        )
+        batch = tmp_path / "plan.jsonl"
+        batch.write_text(
+            '{"id":"call","plan":['
+            '{"command":"pop rdi","values":{"rdi":"<arg0>"}},'
+            '{"command":"pop rsi","values":{"rsi":"<arg1>"}}]}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", str(catalog), "--batch", str(batch), "--jsonl",
+        ])
+
+        assert main() == 0
+
+        record = json.loads(capsys.readouterr().out)
+        assert record["schema"] == "ropcatalog.plan.v1"
+        assert [gadget["address"] for gadget in record["gadgets"]] == ["0x1", "0x3"]
+        assert record["steps"][1]["auto_preserve"] == ["rdi"]
+        assert record["verification"]["status"] == "consistent"
+        assert record["verification"]["executes_target_bytes"] is False
+
+    def test_serve_reuses_loaded_catalog(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libc.txt"
+        catalog.write_text("FileFormat: ELF, Arch: x64\n0x2: pop rdi ; ret\n", encoding="utf-8")
+        monkeypatch.setattr(sys, "stdin", io.StringIO(
+            '{"id":"first","command":"pop rdi"}\n'
+            '{"id":"second","query":"pop rdi ; ret"}\n'
+        ))
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", str(catalog), "--serve", "--fields", "id,address,raw",
+        ])
+
+        assert main() == 0
+
+        records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        assert [record["id"] for record in records] == ["first", "second"]
+        assert all(record["count"] == 1 for record in records)
