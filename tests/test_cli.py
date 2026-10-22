@@ -3,6 +3,7 @@
 """Tests for the CLI argument parser."""
 
 import json
+import io
 import sys
 
 import pytest
@@ -143,8 +144,36 @@ class TestBuildParser:
         with pytest.raises(SystemExit):
             parser.parse_args([])
 
+    @pytest.mark.parametrize("arguments", [
+        ["-"],
+        ["-", "-", "-q", "ret"],
+        ["-", "--batch", "-"],
+    ])
+    def test_stdin_rejects_ambiguous_modes(self, parser, arguments):
+        with pytest.raises(SystemExit):
+            parser.parse_args(arguments)
+
 
 class TestBatchMode:
+    def test_ropgadget_stdin_jsonl(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(
+            "Gadgets information\n"
+            "============================================================\n"
+            "0x00000000000f39fa : pop rdi ; ret\n"
+            "Unique gadgets found: 1\n"
+        ))
+        monkeypatch.setattr(sys, "argv", [
+            "ropcatalog", "-q", "pop rdi ; ret", "--jsonl",
+        ])
+
+        assert main() == 0
+
+        captured = capsys.readouterr()
+        records = [json.loads(line) for line in captured.out.splitlines()]
+        assert records[0]["gadgets"][0]["module"] == "stdin"
+        assert records[0]["gadgets"][0]["address"] == "0xf39fa"
+        assert records[0]["gadgets"][0]["arch"] == "x64"
+
     def test_parses_raw_and_semantic_queries(self, tmp_path):
         batch = tmp_path / "queries.jsonl"
         batch.write_text(

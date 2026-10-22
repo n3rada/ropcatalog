@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "ropcatalog"
 version = "0.9.3"
-description = "Interactive Python tool for parsing, classifying, and searching ROP gadgets from rp++ output files for Windows exploit development."
+description = "Fast ROP gadget retrieval tool for filtering, deduplicating, and searching rp++ and ROPgadget output."
 authors = [
     {name = "n3rada", email = "72791564+n3rada@users.noreply.github.com"}
 ]

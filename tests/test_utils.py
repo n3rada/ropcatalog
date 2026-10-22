@@ -4,7 +4,7 @@
 
 import pytest
 from pathlib import Path
-from ropcatalog.core.utils import format_bad_chars, detect_arch_from_file, detect_file_encoding
+from ropcatalog.core.utils import detect_arch_from_text, format_bad_chars, detect_arch_from_file, detect_file_encoding
 
 
 class TestFormatBadChars:
@@ -34,6 +34,10 @@ class TestFormatBadChars:
 
 
 class TestDetectArchFromFile:
+    def test_ropgadget_x64_detected(self):
+        content = "0x0000000000401000 : pop rdi ; ret\n"
+        assert detect_arch_from_text(content) == "x64"
+
     def test_x64_detected(self, tmp_path):
         f = tmp_path / "gadgets_x64.txt"
         f.write_text("FileFormat: PE | Arch: x64\n0x1000: pop rax ; ret (1 found)\n", encoding="utf-8")

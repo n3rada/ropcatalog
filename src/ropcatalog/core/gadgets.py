@@ -4,7 +4,7 @@
 import re
 from pathlib import Path
 import time
-from typing import Union, List
+from typing import Union, List, TextIO
 
 # Local imports
 from . import registers
@@ -236,7 +236,13 @@ class Gadget:
 
 
 class Gadgets:
-    def __init__(self, file_paths: List[str], bad_chars: list = None, encoding: str | None = None):
+    def __init__(
+        self,
+        file_paths: List[str],
+        bad_chars: list = None,
+        encoding: str | None = None,
+        input_stream: TextIO | None = None,
+    ):
         self._bad_characters = bad_chars
         self._encoding = encoding
         self._unique_mode = True
@@ -248,6 +254,8 @@ class Gadgets:
                 print(f"[!] File {file_path} does not exist.")
                 continue
             all_gadgets.extend(self._parse_file(path))
+        if input_stream is not None:
+            all_gadgets.extend(self._parse_text(input_stream.read(), "stdin"))
 
         # Store full list (all gadgets including bad ones)
         self._full_list = list(all_gadgets)
@@ -317,18 +325,11 @@ class Gadgets:
         return list(seen.values())
 
     def _parse_file(self, file_path: str) -> list:
-        gadget_pattern = re.compile(r"^(0x[0-9a-fA-F]+):\s*(.+?)\s*(?:\(\d+\sfound\))?$", re.MULTILINE)
-
-        start_time = time.time()
-
-        from .utils import detect_file_encoding, detect_arch_from_file
+        from .utils import detect_file_encoding
 
         encoding = self._encoding
         if not encoding:
             encoding = detect_file_encoding(file_path)
-
-        arch = detect_arch_from_file(file_path, encoding=encoding)
-        print(f"[+] Detected architecture: {arch}")
 
         try:
             with open(file_path, mode="r", encoding=encoding) as file_obj:
@@ -338,6 +339,20 @@ class Gadgets:
             print("[!] Try specifying a different encoding with --encoding.")
             return []
 
+        return self._parse_text(file_content, file_path.stem)
+
+    def _parse_text(self, file_content: str, module: str) -> list:
+        gadget_pattern = re.compile(
+            r"^\s*(0x[0-9a-fA-F]+)\s*:\s*(.+?)\s*(?:\(\d+\sfound\))?\s*$",
+            re.MULTILINE,
+        )
+        start_time = time.time()
+
+        from .utils import detect_arch_from_text
+
+        arch = detect_arch_from_text(file_content)
+        print(f"[+] Detected architecture: {arch}")
+
         bad_char_count = 0
         results = []
 
@@ -345,7 +360,7 @@ class Gadgets:
             gadget = Gadget(
                 address=match.group(1),
                 raw_string=match.group(2).strip().lower(),
-                module=file_path.stem,
+                module=module,
                 arch=arch,
             )
             if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
@@ -355,7 +370,7 @@ class Gadgets:
 
         elapsed_time = time.time() - start_time
 
-        print(f"\n[+] {file_path.stem} parsed in {elapsed_time:.2f}s")
+        print(f"\n[+] {module} parsed in {elapsed_time:.2f}s")
         print(f"|-> Total gadgets extracted: {len(results)}")
         print(f"|-> Gadgets containing bad characters: {bad_char_count}")
         return results

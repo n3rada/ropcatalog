@@ -8,6 +8,23 @@ from pathlib import Path
 from chardet import UniversalDetector
 
 
+def detect_arch_from_text(content: str) -> str:
+    """Detect x86 or x64 architecture from gadget extractor output."""
+    for line in content.splitlines():
+        if line.startswith("FileFormat:") and "Arch:" in line:
+            if "x64" in line:
+                return "x64"
+            if "x86" in line:
+                return "x86"
+
+    address = re.search(r"^\s*0x([0-9a-fA-F]+)\s*:", content, re.MULTILINE)
+    if address and len(address.group(1)) > 8:
+        return "x64"
+    if re.search(r"\b(?:r(?:ax|bx|cx|dx|si|di|bp|sp|ip)|r(?:[89]|1[0-5])(?:d|w|b)?)\b", content):
+        return "x64"
+    return "x86"
+
+
 def detect_file_encoding(file_path: Path) -> str:
     """
     Detects the encoding of a file using chardet's streaming detector.
@@ -57,17 +74,11 @@ def detect_arch_from_file(file_path: Path, encoding: str | None = None) -> str:
         encoding = detect_file_encoding(file_path)
     try:
         with open(file_path, mode="r", encoding=encoding) as f:
-            for line in f:
-                if line.startswith("FileFormat:") and "Arch:" in line:
-                    if "x64" in line:
-                        return "x64"
-                    elif "x86" in line:
-                        return "x86"
+            return detect_arch_from_text(f.read())
     except UnicodeDecodeError:
         print(f"[!] Failed to decode '{file_path.name}' with encoding '{encoding}'.")
         print("[!] Try specifying a different encoding with --encoding.")
         raise SystemExit(1)
-    return "x86"  # default fallback
 
 
 def format_bad_chars(bad_chars_string: str) -> list:

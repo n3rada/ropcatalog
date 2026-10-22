@@ -1,6 +1,8 @@
 # 📖 ropcatalog
 
-A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted from [rp++](https://github.com/0vercl0k/rp) output files. It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for Windows exploit development and binary exploitation.
+A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted by [rp++](https://github.com/0vercl0k/rp) or [ROPgadget](https://github.com/JonathanSalwan/ROPgadget). It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for Windows exploit development and binary exploitation.
+
+rp++ and ROPgadget produce large gadget dumps. ropcatalog reduces them to the gadgets you can actually use: stable, bad-character-safe, deduplicated per module, and searchable by exact instructions or exploit operations such as stack pivots and register control. Use the REPL during manual exploit development, or repeatable queries and JSONL for scripting. It stays focused on fast gadget retrieval and leaves the ROP chain under your control.
 
 <p align="center">
     <img src="./media/copy_esp_ASLR.png" alt="ropcatalog: copy ESP with ASLR offset in Python format">
@@ -13,7 +15,7 @@ Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EX
 - **Bad character filtering**: exclude gadgets whose addresses contain bytes that break the exploit
 - **Output styles**: `plain`, `python`, `cpp`, `js` for copy-paste directly into your exploit code
 - **Stability filtering**: automatically removes gadgets with jumps, interrupts, or large stack shifts that would break a ROP chain
-- **Multi-file**: point at a single rp++ output file or an entire directory of gadget dumps
+- **Multi-file**: point at a gadget output file, an entire directory, or piped standard input
 
 > [!TIP]
 > Use the `-c` flag to run a single command without entering the REPL. This is useful for piping gadget output directly into files or other tools.
@@ -87,6 +89,14 @@ ropcatalog fbserver.txt -c "pivot reg" > pivot_gadgets.txt
 ropcatalog fbserver.txt -c "pop eax" -s python > pop_eax.py
 ```
 
+ROPgadget output can be passed directly over standard input:
+
+```shell
+ROPgadget --binary /usr/lib/x86_64-linux-gnu/libc.so.6 | ropcatalog -q 'pop rdi ; ret' --jsonl
+```
+
+When a non-interactive mode receives piped input, the input path can be omitted. Use `-` when standard input must be listed explicitly alongside file paths. Standard input cannot provide both gadget output and `--batch -` queries.
+
 For non-interactive research, repeat `--query` or load one exact gadget per line with `--batch`. No `?` prefix is required. JSON objects use `query` for an exact gadget or `command` for a semantic ropcatalog command:
 
 ```shell
@@ -103,12 +113,12 @@ ropcatalog libphp.so.txt --batch queries.jsonl --jsonl --artifact-dir artifacts
 ## 🧸 Usage
 
 ```
-ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND | -q QUERY | --batch PATH] [--jsonl] [--limit LIMIT] [--artifact-dir ARTIFACT_DIR] paths [paths ...]
+ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND | -q QUERY | --batch PATH] [--jsonl] [--limit LIMIT] [--artifact-dir ARTIFACT_DIR] [paths ...]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `paths` | One or more rp++ output files or directories |
+| `paths` | rp++ or ROPgadget output files/directories, or `-` for standard input; required unless input is piped to a non-interactive mode |
 | `-b`, `--bad-characters` | Exclude addresses containing these bytes (e.g., `\x00\x0a\x0d`) |
 | `-a`, `--all` | Disable uniqueness filtering (show all duplicate gadgets) |
 | `-s`, `--style` | Output format: `plain`, `python`, `js`, `cpp` |
@@ -116,10 +126,10 @@ ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENC
 | `-e`, `--encoding` | Force file encoding (auto-detected if not set) |
 | `-c`, `--command` | Run a single command and exit (useful for piping output) |
 | `-q`, `--query` | Run an exact gadget query and exit; repeat to execute multiple queries |
-| `--batch` | Read queries from a UTF-8 file, or `-` for standard input; alternative to `--command` and `--query` |
-| `--jsonl` | Emit one JSON object per query to stdout, suitable for `jq` pipelines or agents |
+| `--batch` | Read queries from a UTF-8 file, or `-` for standard input; mutually exclusive with `--command` and `--query` |
+| `--jsonl` | Emit one JSON object per query to stdout unless `--artifact-dir` is used, suitable for `jq` pipelines or agents |
 | `--limit` | Return at most this many gadgets per query while retaining the total count; requires a non-interactive query mode |
-| `--artifact-dir` | Write module-named JSONL files instead of stdout; requires `--jsonl` and a non-interactive query mode |
+| `--artifact-dir` | Write module-named JSONL files instead of stdout and suppress routine diagnostics; requires `--jsonl` and a non-interactive query mode |
 
 JSONL gadget records include `module`, `address`, `arch`, `instructions`, `raw`, and the selected copy-paste `formatted` representation. Input and results stay in order, making IDs stable across runs.
 
