@@ -232,6 +232,14 @@ def get_sub_registers(arch: str) -> Dict[str, List[str]]:
     return SUB_REGISTERS_X64 if arch == 'x64' else SUB_REGISTERS_X86
 
 
+def canonical_register(reg: str, arch: str = 'x86') -> str:
+    reg = reg.lower().strip()
+    for canonical, aliases in get_sub_registers(arch).items():
+        if reg in aliases:
+            return canonical
+    return reg
+
+
 def is_register(operand: str, arch: str = 'x86') -> bool:
     """
     Check if the operand is a valid register for the given architecture.

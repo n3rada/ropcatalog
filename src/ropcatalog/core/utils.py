@@ -11,8 +11,9 @@ from chardet import UniversalDetector
 def detect_arch_from_text(content: str) -> str:
     """Detect x86 or x64 architecture from gadget extractor output."""
     for line in content.splitlines():
-        if line.startswith("FileFormat:") and "Arch:" in line:
-            if "x64" in line:
+        line = line.strip().lower()
+        if line.startswith("fileformat:") and "arch:" in line:
+            if re.search(r"\b(?:x64|x86[-_]64|amd64)\b", line):
                 return "x64"
             if "x86" in line:
                 return "x86"
@@ -40,6 +41,16 @@ def detect_file_encoding(file_path: Path) -> str:
     Raises:
         SystemExit: When encoding cannot be determined.
     """
+    with open(file_path, mode="rb") as stream:
+        prefix = stream.read(4096)
+    if b"\x00" not in prefix:
+        try:
+            prefix.decode("utf-8-sig")
+            print(f"[+] Detected encoding for '{file_path.name}': utf-8")
+            return "utf-8-sig" if prefix.startswith(b"\xef\xbb\xbf") else "utf-8"
+        except UnicodeDecodeError:
+            pass
+
     detector = UniversalDetector()
     with open(file_path, mode="rb") as f:
         for line in f:

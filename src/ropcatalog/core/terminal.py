@@ -87,6 +87,14 @@ class Terminal:
             "loadcr": self.load_cr,
         }
 
+    @property
+    def command_names(self) -> set[str]:
+        return set(self._commands)
+
+    @property
+    def query_command_names(self) -> set[str]:
+        return set(self._commands) - {"clear", "exit", "help", "offset", "style", "uniq"}
+
     def execute(self, command_input: str) -> list:
         command_parts = command_input.split(maxsplit=1)
         cmd = command_parts[0].lower()
@@ -157,7 +165,7 @@ class Terminal:
                 results = self.execute(command)
 
                 if results:
-                    results = sorted(results, key=gadgets.sort_key, reverse=True)
+                    results = sorted(results, key=gadgets.sort_key)
                     for gadget in results:
                         print(self._formatter.format(gadget, self._with_base_address))
 
@@ -200,7 +208,7 @@ class Terminal:
             return 1
 
         if results:
-            results = sorted(results, key=gadgets.sort_key, reverse=True)
+            results = sorted(results, key=gadgets.sort_key)
             for gadget in results:
                 print(self._formatter.format(gadget, self._with_base_address))
             print(f"---- {len(results)} gadget(s)", file=sys.stderr)

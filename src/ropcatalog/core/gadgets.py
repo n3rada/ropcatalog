@@ -1,6 +1,8 @@
 # ropcatalog/core/gadgets.py
 
 # Built-in imports
+import hashlib
+import json
 import re
 from pathlib import Path
 import time
@@ -8,13 +10,13 @@ from typing import Union, List, TextIO
 
 # Local imports
 from . import registers
+from . import semantics
 
 def sort_key(gadget: 'Gadget') -> tuple:
-    instr_count = len(gadget.instructions)
-    # Penalize retn IMM to deprioritize large stack shifts
-    if "retn 0x" in gadget.raw:
-        return (instr_count + 0.5, int(re.search(r"retn 0x([0-9a-fA-F]+)", gadget.raw).group(1), 16))
-    return (instr_count, 0)
+    return (
+        gadget.semantics["quality"]["score"], gadget.module or "",
+        gadget.source_id or "", int(gadget.address, 16), gadget.raw,
+    )
 
 
 class Gadget:
@@ -60,12 +62,35 @@ class Gadget:
     def instruction_string_to_list(instruction_string: str) -> list:
         return [instruction.strip() for instruction in instruction_string.split(";") if instruction.strip()]
 
-    def __init__(self, address: str, raw_string: str, module: str = None, arch: str = 'x86'):
+    def __init__(
+        self,
+        address: str,
+        raw_string: str,
+        module: str = None,
+        arch: str = 'x86',
+        source_id: str | None = None,
+        bytes_hex: str | None = None,
+        address_kind: str = "unknown",
+    ):
         self._arch = arch.lower()
         self._address = f"0x{int(address, 16):x}"
         self._module = module
-        self._raw = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
-        self._instructions = Gadget.instruction_string_to_list(instruction_string=self._raw)
+        self._source_id = source_id or module
+        self._address_kind = address_kind
+        normalized = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
+        dump_match = re.search(r"\s+//\s*([0-9a-f]+)$", normalized)
+        rp_bytes_match = re.search(r"(?:;\s*)?((?:\\x[0-9a-f]{2})+)$", normalized)
+        extracted_bytes = dump_match.group(1) if dump_match else None
+        if rp_bytes_match:
+            extracted_bytes = rp_bytes_match.group(1).replace("\\x", "")
+        self._bytes_hex = bytes_hex or extracted_bytes
+        if dump_match:
+            normalized = normalized[:dump_match.start()].strip()
+        elif rp_bytes_match:
+            normalized = normalized[:rp_bytes_match.start()].strip()
+        self._instructions = Gadget.instruction_string_to_list(instruction_string=normalized)
+        self._raw = " ; ".join(self._instructions)
+        self._semantics = semantics.analyze(self._instructions, self._arch)
 
 
     def uses_only_volatile_regs(self) -> bool:
@@ -142,7 +167,7 @@ class Gadget:
             return True   # Direct call or uncontrolled - bad op
 
         # Check for large retn values
-        if match := re.search(r"retn 0x([0-9a-fA-F]+)", self._raw):
+        if match := re.search(r"\bret(?:n)?\s+0x([0-9a-fA-F]+)", self._raw):
             if int(match.group(1), 16) > self.MAX_RETN:
                 return True
 
@@ -154,7 +179,9 @@ class Gadget:
         return False
 
     def has_bad_chars_in_address(self, bad_chars: list) -> bool:
-        for byte in [self._address[i: i + 2] for i in range(2, len(self._address), 2)]:
+        address = self._address[2:]
+        address = address.zfill(len(address) + len(address) % 2)
+        for byte in [address[index: index + 2] for index in range(0, len(address), 2)]:
             if byte in bad_chars:
                 return True
         return False
@@ -234,6 +261,22 @@ class Gadget:
     def arch(self) -> str:
         return self._arch
 
+    @property
+    def semantics(self) -> dict:
+        return self._semantics
+
+    @property
+    def source_id(self) -> str:
+        return self._source_id
+
+    @property
+    def bytes_hex(self) -> str | None:
+        return self._bytes_hex
+
+    @property
+    def address_kind(self) -> str:
+        return self._address_kind
+
 
 class Gadgets:
     def __init__(
@@ -242,10 +285,13 @@ class Gadgets:
         bad_chars: list = None,
         encoding: str | None = None,
         input_stream: TextIO | None = None,
+        input_module: str = "stdin",
+        address_kind: str = "unknown",
     ):
         self._bad_characters = bad_chars
         self._encoding = encoding
         self._unique_mode = True
+        self._address_kind = address_kind
 
         all_gadgets = []
         for file_path in file_paths:
@@ -255,7 +301,7 @@ class Gadgets:
                 continue
             all_gadgets.extend(self._parse_file(path))
         if input_stream is not None:
-            all_gadgets.extend(self._parse_text(input_stream.read(), "stdin"))
+            all_gadgets.extend(self._parse_text(input_stream.read(), input_module))
 
         # Store full list (all gadgets including bad ones)
         self._full_list = list(all_gadgets)
@@ -319,7 +365,7 @@ class Gadgets:
         seen = {}
         for g in gadgets_list:
             # Key by both module and raw instruction
-            key = (g.module, g.raw)
+            key = (g.source_id, g.module, g.raw)
             if key not in seen:
                 seen[key] = g
         return list(seen.values())
@@ -342,6 +388,10 @@ class Gadgets:
         return self._parse_text(file_content, file_path.stem)
 
     def _parse_text(self, file_content: str, module: str) -> list:
+        file_content = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", file_content)
+        if '"schema":"ropcatalog.catalog.v1"' in file_content:
+            return self._parse_catalog(file_content)
+
         gadget_pattern = re.compile(
             r"^\s*(0x[0-9a-fA-F]+)\s*:\s*(.+?)\s*(?:\(\d+\sfound\))?\s*$",
             re.MULTILINE,
@@ -355,6 +405,7 @@ class Gadgets:
 
         bad_char_count = 0
         results = []
+        source_id = hashlib.sha256(file_content.encode("utf-8")).hexdigest()[:16]
 
         for match in gadget_pattern.finditer(file_content):
             gadget = Gadget(
@@ -362,6 +413,8 @@ class Gadgets:
                 raw_string=match.group(2).strip().lower(),
                 module=module,
                 arch=arch,
+                source_id=source_id,
+                address_kind=self._address_kind,
             )
             if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
                 bad_char_count += 1
@@ -375,10 +428,62 @@ class Gadgets:
         print(f"|-> Gadgets containing bad characters: {bad_char_count}")
         return results
 
+    def _parse_catalog(self, file_content: str) -> list:
+        results = []
+        for line_number, line in enumerate(file_content.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                if record.get("schema") != "ropcatalog.catalog.v1":
+                    raise ValueError("unexpected schema")
+                gadget = Gadget(
+                    address=record["address"],
+                    raw_string=record["raw"],
+                    module=record["module"],
+                    arch=record["arch"],
+                    source_id=record["source_id"],
+                    bytes_hex=record.get("bytes"),
+                    address_kind=record.get("address_kind", "unknown"),
+                )
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"invalid catalog record on line {line_number}: {error}") from error
+            if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
+                continue
+            results.append(gadget)
+        print(f"[+] Loaded reusable catalog with {len(results)} gadget(s)")
+        return results
+
+    def write_catalog(self, path: Path) -> int:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ordered = sorted(
+            self._full_list,
+            key=lambda gadget: (gadget.module, gadget.source_id, int(gadget.address, 16), gadget.raw),
+        )
+        with path.open("w", encoding="utf-8") as stream:
+            for gadget in ordered:
+                record = {
+                    "schema": "ropcatalog.catalog.v1",
+                    "source_id": gadget.source_id,
+                    "module": gadget.module,
+                    "address": gadget.address,
+                    "address_kind": gadget.address_kind,
+                    "arch": gadget.arch,
+                    "raw": gadget.raw,
+                }
+                if gadget.bytes_hex is not None:
+                    record["bytes"] = gadget.bytes_hex
+                print(json.dumps(record, separators=(",", ":"), sort_keys=True), file=stream)
+        return len(ordered)
+
     def to_dict(self) -> dict:
         return {g.address: g.raw for g in self._active_list}
 
     @property
     def gadgets(self) -> list:
         return self._active_list
+
+    @property
+    def full_count(self) -> int:
+        return len(self._full_list)
 

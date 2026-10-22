@@ -29,6 +29,9 @@ class TestGadgetConstruction:
         g = make_gadget(arch="x64")
         assert g.arch == "x64"
 
+    def test_address_kind_defaults_to_unknown(self, make_gadget):
+        assert make_gadget().address_kind == "unknown"
+
     def test_str(self, make_gadget):
         g = make_gadget(address="0x10001000", raw="pop eax ; ret", module="testmod")
         assert "0x10001000" in str(g)
@@ -52,6 +55,45 @@ class TestInstructionParsing:
     def test_instruction_string_to_list_single(self):
         result = Gadget.instruction_string_to_list("ret")
         assert result == ["ret"]
+
+    def test_ropper_trailing_delimiter_normalized(self, make_gadget):
+        gadget = make_gadget(raw="pop rdi; ret;", arch="x64")
+        assert gadget.raw == "pop rdi ; ret"
+
+    def test_ropgadget_dump_bytes_separated(self, make_gadget):
+        gadget = make_gadget(raw="pop rdi ; ret // 5fc3", arch="x64")
+        assert gadget.raw == "pop rdi ; ret"
+        assert gadget.bytes_hex == "5fc3"
+        assert gadget.exact_match("pop rdi ; ret") is True
+
+    def test_rp_print_bytes_separated(self, make_gadget):
+        gadget = make_gadget(raw=r"pop rcx ; ret ; \x59\xc3", arch="x64")
+        assert gadget.raw == "pop rcx ; ret"
+        assert gadget.bytes_hex == "59c3"
+        assert gadget.exact_match("pop rcx ; ret") is True
+
+
+class TestSemantics:
+    def test_pop_stack_effect(self, make_gadget):
+        gadget = make_gadget(raw="pop rdi ; ret", arch="x64")
+        assert gadget.semantics["stack_delta"] == 16
+        assert gadget.semantics["stack_pops"] == ["rdi"]
+        assert gadget.semantics["clobbers"] == ["rdi"]
+        assert gadget.semantics["terminator"] == "ret"
+
+    def test_memory_write_reads_pointer(self, make_gadget):
+        gadget = make_gadget(raw="mov qword ptr [rax], rdi ; ret", arch="x64")
+        assert gadget.semantics["register_reads"] == ["rax", "rdi"]
+        assert gadget.semantics["memory_writes"] == ["[rax]"]
+
+    def test_dynamic_pivot(self, make_gadget):
+        gadget = make_gadget(raw="xchg rsp, rax ; ret", arch="x64")
+        assert gadget.semantics["stack_delta"] is None
+
+    def test_non_ret_terminator_is_penalized(self, make_gadget):
+        call_gadget = make_gadget(raw="pop rdi ; call rax", arch="x64")
+        ret_gadget = make_gadget(raw="pop rdi ; ret", arch="x64")
+        assert sort_key(ret_gadget) < sort_key(call_gadget)
 
 
 class TestExactMatch:
@@ -143,6 +185,10 @@ class TestUnstableOps:
         g = make_gadget(raw="pop eax ; retn 0x100")
         assert g.has_unstable_op() is True
 
+    def test_large_ropper_ret_unstable(self, make_gadget):
+        g = make_gadget(raw="pop eax; ret 0x100;")
+        assert g.has_unstable_op() is True
+
     def test_small_retn_stable(self, make_gadget):
         g = make_gadget(raw="pop eax ; retn 0x04")
         assert g.has_unstable_op() is False
@@ -180,6 +226,10 @@ class TestBadChars:
     def test_empty_bad_chars(self, make_gadget):
         g = make_gadget(address="0x100a1000")
         assert g.has_bad_chars_in_address([]) is False
+
+    def test_short_address_is_padded_to_a_byte(self, make_gadget):
+        g = make_gadget(address="0x1")
+        assert g.has_bad_chars_in_address(["01"]) is True
 
 
 class TestPushCoherence:
