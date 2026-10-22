@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "ropcatalog"
 version = "0.9.3"
-description = "Fast ROP gadget retrieval tool for filtering, deduplicating, and searching rp++ and ROPgadget output."
+description = "Fast ROP gadget retrieval for filtering, deduplicating, and searching rp++, ROPgadget, and Ropper output."
 authors = [
     {name = "n3rada", email = "72791564+n3rada@users.noreply.github.com"}
 ]
