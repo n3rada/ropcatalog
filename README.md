@@ -1,8 +1,8 @@
 # 📖 ropcatalog
 
-`ropcatalog` is an x86/x64 gadget retrieval and bounded ROP-chain synthesis tool for exploit development. It consumes dumps from [rp++](https://github.com/0vercl0k/rp), [ROPgadget](https://github.com/JonathanSalwan/ROPgadget), and [Ropper](https://github.com/sashs/Ropper), then makes the useful gadgets fast to find, compare, and reuse.
+`ropcatalog` is a post-extraction x86/x64 ROP gadget finder, semantic search engine, and bounded ROP-chain builder for exploit development. It consumes dumps from [rp++](https://github.com/0vercl0k/rp), [ROPgadget](https://github.com/JonathanSalwan/ROPgadget), and [Ropper](https://github.com/sashs/Ropper), then makes useful gadgets fast to find, compare, and reuse.
 
-Extractor output gets large quickly. `ropcatalog` filters unstable and bad-character addresses, removes duplicate gadgets per module, models side effects, and ranks candidates by exploit context. Use the interactive REPL while building an exploit, concise commands in shell pipelines, or the JSONL interface when a script or AI agent needs exact retrieval and a verifiable chain plan.
+This is the semantic post-processing layer for gadget extractors, not another disassembler. `ropcatalog` filters unstable and bad-character addresses, removes duplicate gadgets per module, models side effects, and ranks candidates by exploit context. Use the interactive REPL while building an exploit, concise commands in shell pipelines, or the JSONL interface when a script or AI agent needs exact retrieval and a verifiable chain plan.
 
 Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and ROP-chain construction.
 

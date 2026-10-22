@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "ropcatalog"
 version = "0.9.3"
-description = "Fast ROP gadget retrieval and bounded chain synthesis from rp++, ROPgadget, and Ropper output."
+description = "Post-extraction ROP gadget finder, semantic search, and bounded chain synthesis for rp++, ROPgadget, and Ropper output."
 authors = [
     {name = "n3rada", email = "72791564+n3rada@users.noreply.github.com"}
 ]
@@ -17,8 +17,9 @@ keywords = [
     "rop", "rop-chain", "rop-gadgets", "return-oriented-programming",
     "exploit-development", "exploit", "binary-exploitation",
     "gadget", "x86", "x64", "aslr", "bypass",
-    "rp-plus-plus", "offsec", "exp-301", "exp-401",
-    "windows", "python", "pentesting",
+    "rp-plus-plus", "ropgadget", "ropper", "gadget-finder",
+    "semantic-search", "chain-builder", "offsec", "exp-301", "exp-401",
+    "windows", "linux", "kernel-exploitation", "python", "pentesting",
 ]
 
 classifiers = [
