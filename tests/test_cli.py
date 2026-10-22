@@ -92,6 +92,35 @@ class TestBuildParser:
         args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "--jsonl", "--artifact-dir", str(tmp_path)])
         assert args.artifact_dir == tmp_path
 
+    @pytest.mark.parametrize("query_modes", [
+        ["-c", "pivot reg", "-q", "pop rdi ; ret"],
+        ["-c", "pivot reg", "--batch", "queries.jsonl"],
+        ["-q", "pop rdi ; ret", "--batch", "queries.jsonl"],
+    ])
+    def test_query_modes_are_mutually_exclusive(self, parser, query_modes):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", *query_modes])
+
+    @pytest.mark.parametrize("arguments", [
+        ["--jsonl"],
+        ["--limit", "1"],
+        ["--artifact-dir", "artifacts"],
+        ["--batch", "queries.jsonl", "--artifact-dir", "artifacts"],
+    ])
+    def test_output_modes_require_dependencies(self, parser, arguments):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", *arguments])
+
+    @pytest.mark.parametrize("limit", ["0", "-1"])
+    def test_limit_must_be_positive(self, parser, limit):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", "-q", "pop rdi ; ret", "--limit", limit])
+
+    @pytest.mark.parametrize("query_mode", ["-c", "-q", "--batch"])
+    def test_query_mode_value_must_not_be_empty(self, parser, query_mode):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["gadgets.txt", query_mode, ""])
+
     def test_combined_args(self, parser):
         args = parser.parse_args([
             "gadgets.txt", "other.txt",

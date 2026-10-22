@@ -21,8 +21,38 @@ class Query:
     raw_gadget: bool = False
 
 
+class RopCatalogArgumentParser(argparse.ArgumentParser):
+    def parse_args(self, args=None, namespace=None):
+        parsed = super().parse_args(args, namespace)
+        noninteractive = (
+            parsed.command is not None
+            or bool(parsed.query)
+            or parsed.batch is not None
+        )
+        if parsed.jsonl and not noninteractive:
+            self.error("--jsonl requires --command, --query, or --batch")
+        if parsed.artifact_dir and not parsed.jsonl:
+            self.error("--artifact-dir requires --jsonl")
+        if parsed.limit is not None and not noninteractive:
+            self.error("--limit requires --command, --query, or --batch")
+        return parsed
+
+
+def positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def non_empty_string(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("must not be empty")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RopCatalogArgumentParser(
         prog="ropcatalog",
         add_help=True,
         description="rp++ gadget parser for specific instructions.",
@@ -76,27 +106,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="File encoding (e.g., utf-8, utf-16). Auto-detected if not set.",
     )
 
-    parser.add_argument(
+    query_source = parser.add_mutually_exclusive_group()
+    query_source.add_argument(
         "-c",
         "--command",
-        type=str,
+        type=non_empty_string,
         default=None,
         required=False,
         help="Run a single command and exit (e.g., -c 'pivot reg'). Useful for piping output.",
     )
-    parser.add_argument(
+    query_source.add_argument(
         "-q",
         "--query",
         action="append",
+        type=non_empty_string,
         default=[],
-        help="Run a query and exit. Repeat to execute multiple queries.",
+        help="Run an exact gadget query and exit. Repeat to execute multiple queries.",
     )
-    parser.add_argument(
+    query_source.add_argument(
         "--batch",
-        type=str,
+        type=non_empty_string,
         default=None,
         metavar="PATH",
-        help="Read newline-delimited queries from PATH, or '-' for standard input.",
+        help="Read newline-delimited queries from PATH, or '-' for standard input. Use instead of --command or --query.",
     )
     parser.add_argument(
         "--jsonl",
@@ -105,9 +137,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--limit",
-        type=int,
+        type=positive_integer,
         default=None,
-        help="Return at most this many gadgets per query.",
+        help="Return at most this many gadgets per query. Requires a non-interactive query mode.",
     )
     parser.add_argument(
         "--artifact-dir",
@@ -241,15 +273,11 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    noninteractive = bool(args.command or args.query or args.batch)
-    if args.command and (args.query or args.batch):
-        parser.error("--command cannot be combined with --query or --batch")
-    if args.jsonl and not noninteractive:
-        parser.error("--jsonl requires --command, --query, or --batch")
-    if args.artifact_dir and (not args.jsonl or not noninteractive):
-        parser.error("--artifact-dir requires JSONL non-interactive mode")
-    if args.limit is not None and args.limit < 1:
-        parser.error("--limit must be greater than zero")
+    noninteractive = (
+        args.command is not None
+        or bool(args.query)
+        or args.batch is not None
+    )
 
     # In command mode, redirect loading messages to stderr so only
     # gadget output goes to stdout (clean for piping/redirection)

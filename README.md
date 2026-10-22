@@ -103,7 +103,7 @@ ropcatalog libphp.so.txt --batch queries.jsonl --jsonl --artifact-dir artifacts
 ## 🧸 Usage
 
 ```
-ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND] [-q QUERY] [--batch PATH] [--jsonl] [--limit LIMIT] [--artifact-dir DIR] paths [paths ...]
+ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [-c COMMAND | -q QUERY | --batch PATH] [--jsonl] [--limit LIMIT] [--artifact-dir ARTIFACT_DIR] paths [paths ...]
 ```
 
 | Flag | Description |
@@ -115,11 +115,11 @@ ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENC
 | `-o`, `--offset` | Prefix addresses with base address variable (for ASLR rebasing) |
 | `-e`, `--encoding` | Force file encoding (auto-detected if not set) |
 | `-c`, `--command` | Run a single command and exit (useful for piping output) |
-| `-q`, `--query` | Run a query and exit; repeat for a batch |
-| `--batch` | Read queries from a UTF-8 file, or `-` for standard input |
+| `-q`, `--query` | Run an exact gadget query and exit; repeat to execute multiple queries |
+| `--batch` | Read queries from a UTF-8 file, or `-` for standard input; alternative to `--command` and `--query` |
 | `--jsonl` | Emit one JSON object per query to stdout, suitable for `jq` pipelines or agents |
-| `--limit` | Return at most this many gadgets per query while retaining the total count |
-| `--artifact-dir` | Write module-named JSONL files instead of stdout; requires non-interactive JSONL mode |
+| `--limit` | Return at most this many gadgets per query while retaining the total count; requires a non-interactive query mode |
+| `--artifact-dir` | Write module-named JSONL files instead of stdout; requires `--jsonl` and a non-interactive query mode |
 
 JSONL gadget records include `module`, `address`, `arch`, `instructions`, `raw`, and the selected copy-paste `formatted` representation. Input and results stay in order, making IDs stable across runs.
 
