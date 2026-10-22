@@ -1,303 +1,219 @@
 # 📖 ropcatalog
 
-A Python tool for parsing, classifying, and browsing [ROP (Return-Oriented Programming)](https://en.wikipedia.org/wiki/Return-oriented_programming) gadgets extracted by [rp++](https://github.com/0vercl0k/rp), [ROPgadget](https://github.com/JonathanSalwan/ROPgadget), or [Ropper](https://github.com/sashs/Ropper). It provides an interactive REPL with over 30 commands to search, filter, and format gadgets for Windows exploit development and binary exploitation.
+`ropcatalog` is an x86/x64 gadget retrieval and bounded ROP-chain synthesis tool for exploit development. It consumes dumps from [rp++](https://github.com/0vercl0k/rp), [ROPgadget](https://github.com/JonathanSalwan/ROPgadget), and [Ropper](https://github.com/sashs/Ropper), then makes the useful gadgets fast to find, compare, and reuse.
 
-rp++, ROPgadget, and Ropper produce large gadget dumps. ropcatalog reduces them to the gadgets you can actually use: stable, bad-character-safe, deduplicated per module, ranked by side effects, and searchable by exact instructions or exploit operations such as stack pivots and register control. Use the REPL during manual exploit development, or repeatable constrained queries and JSONL for scripting. It stays focused on fast gadget retrieval and leaves the final ROP chain under your control.
+Extractor output gets large quickly. `ropcatalog` filters unstable and bad-character addresses, removes duplicate gadgets per module, models side effects, and ranks candidates by exploit context. Use the interactive REPL while building an exploit, concise commands in shell pipelines, or the JSONL interface when a script or AI agent needs exact retrieval and a verifiable chain plan.
 
-<p align="center">
-    <img src="./media/copy_esp_ASLR.png" alt="ropcatalog: copy ESP with ASLR offset in Python format">
-</p>
+Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and ROP-chain construction.
 
-Built during an [OffSec](https://www.offsec.com/) journey, primarily for the [EXP-301](https://www.offsec.com/courses/exp-301/) and [EXP-401](https://www.offsec.com/courses/exp-401/) courses focused on Windows exploit development and [ROP chain](https://en.wikipedia.org/wiki/Return-oriented_programming) construction.
+## Why ropcatalog
 
-- **Gadget search**: exact, partial, regex, and semantic commands (`copy`, `pivot`, `zero`, `pop`, `syscall`, and more)
-- **ASLR support**: `--offset` mode prefixes all addresses with a base variable for dynamic rebase at runtime
-- **Bad character filtering**: exclude gadgets whose addresses contain bytes that break the exploit
-- **Output styles**: `plain`, `python`, `cpp`, `js` for copy-paste directly into your exploit code
-- **Stability filtering**: automatically removes gadgets with jumps, interrupts, or large stack shifts that would break a ROP chain
-- **Multi-file**: point at a gadget output file, an entire directory, or piped standard input
-- **Machine interface**: structured gadget effects, constraints, reusable catalogs, and bounded chain plans
+- Query by exact instructions, regex, or exploit intent such as `pivot reg`, `copy rax`, `writeptr rcx`, and `syscall`.
+- Keep bad characters, stack effects, memory writes, register clobbers, and control flow visible during selection.
+- Format selected addresses for Python, C++, or JavaScript exploit code, including ASLR-relative expressions.
+- Parse multiple modules once and save a reusable catalog for low-latency queries.
+- Give scripts and agents bounded JSONL output, stable gadget IDs, rejection evidence, and deterministic artifacts.
+- Synthesize register setup, arbitrary writes, indirect transitions, and ABI calls with explicit search limits.
 
-> [!TIP]
-> Use the `-c` flag to run a single command without entering the REPL. This is useful for piping gadget output directly into files or other tools.
+`ropcatalog` does not scan binaries. Use your preferred gadget extractor, then pass its text output to `ropcatalog`.
 
-## 📦 Installation
+## Try It
 
-Prefer using [`uv`](https://docs.astral.sh/uv/), a fast Python package manager that installs tools in isolated environments. Alternatively, [`pipx`](https://pypa.github.io/pipx/) or `pip` work as well.
+Install from GitHub with `uv`:
 
-### With [uv](https://docs.astral.sh/uv/) (recommended)
-
-[`uv tool install`](https://docs.astral.sh/uv/guides/tools/#installing-tools) persistently installs the tool and adds it to your `PATH`, similar to `pipx`:
-
-**From GitHub (latest):**
-
-```bash
+```shell
 uv tool install git+https://github.com/n3rada/ropcatalog.git
 ```
 
-After installation, `ropcatalog` is available directly:
-
-```bash
-ropcatalog --help
-```
-
-To upgrade later:
-
-```bash
-uv tool upgrade ropcatalog
-```
-
-> [!TIP]
-> You can also run `ropcatalog` **without installing** it using [`uvx`](https://docs.astral.sh/uv/guides/tools/#running-tools) (alias for `uv tool run`), which creates a temporary isolated environment on the fly:
-> ```bash
-> uvx --from git+https://github.com/n3rada/ropcatalog.git ropcatalog --help
-> ```
-
-### With pipx or pip
-
-```bash
-pipx install 'git+https://github.com/n3rada/ropcatalog.git'
-```
-
-```bash
-pip install 'git+https://github.com/n3rada/ropcatalog.git'
-```
-
-## ⚡ Quickstart
-
-First, dump gadgets from a target binary using [rp++](https://github.com/0vercl0k/rp):
+Or run it once without installing:
 
 ```shell
+uvx --from git+https://github.com/n3rada/ropcatalog.git ropcatalog --help
+```
+
+For a Windows rp++ dump, start the REPL with bad-character filtering and Python output:
+
+```powershell
 rp-win.exe -f "C:\target\libeay32IBM019.dll" --va=0 -r 5 > libeay32IBM019.txt
+ropcatalog libeay32IBM019.txt -b '\x00\x09\x0a\x0b\x0c\x0d\x20' --offset --style python
 ```
 
-Then, open the catalog. Use `--offset` for ASLR rebasing and `--style` for a copy-pastable output format:
+On Linux, query ROPgadget output directly without an intermediate file:
 
 ```shell
-ropcatalog libeay32IBM019.txt -b "\x00\x09\x0a\x0b\x0c\x0d\x20" -o -s python
+ROPgadget --binary /usr/lib/x86_64-linux-gnu/libc.so.6 | ropcatalog --stdin-module libc.so.6 --address-kind rva --command 'pop rdi'
 ```
 
-You can also point at a directory containing multiple rp++ output files:
+Add `--jsonl` and `--limit` when another process consumes the result:
 
 ```shell
-ropcatalog ./gadgets/ -o -s cpp
+ROPgadget --binary ./target | ropcatalog --stdin-module target --address-kind rva --query 'pop rdi ; ret' --jsonl --limit 5 | jq 'select(.status == "ok") | .gadgets[] | {id, address, raw}'
 ```
 
-For scripting and piping, use `-c` to run a single command without entering the REPL:
+Ropper works through the same pipe:
 
 ```shell
-ropcatalog fbserver.txt -c "pivot reg" > pivot_gadgets.txt
-ropcatalog fbserver.txt -c "pop eax" -s python > pop_eax.py
+ropper --file ./target --nocolor | ropcatalog --stdin-module target --address-kind rva --query 'pop rdi ; ret' --jsonl --limit 5
 ```
 
-ROPgadget output can be passed directly over standard input:
+## Manual Exploit Development
+
+Pass a file or a directory of extractor output to enter the REPL:
 
 ```shell
-ROPgadget --binary /usr/lib/x86_64-linux-gnu/libc.so.6 | ropcatalog --stdin-module libc.so.6 --address-kind rva -q 'pop rdi ; ret' --jsonl
+ropcatalog ./gadgets/ --offset --style python
 ```
 
-Ropper works the same way. `--nocolor` keeps upstream logs and saved dumps cleaner:
+Run `help` in the REPL for the complete command list. Common operations include:
+
+| Goal | Commands | Example |
+| --- | --- | --- |
+| Exact, partial, or regex search | `?`, `/`, `.` | `? pop rax ; ret` |
+| Memory displacement search | `memoff` | `memoff rbx+0x20` |
+| Move or preserve a value | `copy`, `copyto`, `save`, `saveto` | `copyto r9` |
+| Set or modify a register | `zero`, `neg`, `not`, `inc`, `dec`, `add`, `sub`, `swap` | `neg eax` |
+| Read or write memory | `read`, `writereg`, `writeptr`, `writeimm`, `writebyte` | `writeptr rax` |
+| Find stack operations | `push`, `pop`, `pushad`, `popad`, `ppr`, `pivot` | `pivot reg` |
+| Find control transfers | `ret`, `jump`, `call`, `syscall`, `transition` | `call rax` |
+
+Append `/v` to restrict semantic results to volatile registers. Append `/n` to include candidates rejected by normal stability filtering. Modifiers can appear in either order.
+
+For a single shell-friendly operation, use `--command`:
 
 ```shell
-ropper --file /usr/lib/x86_64-linux-gnu/libc.so.6 --nocolor | ropcatalog --stdin-module libc.so.6 --address-kind rva -q 'pop rdi ; ret' --jsonl
+ropcatalog target.txt --command 'pivot reg'
+ropcatalog target.txt --command 'pop eax' --style python
 ```
 
-When a non-interactive mode receives piped input, the input path can be omitted. Use `-` when standard input must be listed explicitly alongside file paths. Standard input cannot provide both gadget output and `--batch -` queries.
+The available output styles are `plain`, `python`, `cpp`, and `js`. With `--offset`, virtual addresses become base-relative expressions suitable for targets with ASLR:
 
-For non-interactive research, repeat `--query` or load one exact gadget per line with `--batch`. No `?` prefix is required. JSON objects use `query` for an exact gadget or `command` for a semantic ropcatalog command:
-
-```shell
-printf '%s\n' 'pop rdi ; ret' '{"id":"pivot","command":"pivot reg"}' > queries.jsonl
-ropcatalog libphp.so.txt --batch queries.jsonl --jsonl --limit 10
-```
-
-JSON requests can constrain side effects. A rejected query includes counts by reason and up to three relaxed alternatives:
-
-```shell
-printf '%s\n' '{"id":"rdi","command":"pop rdi","constraints":{"preserve":["rsi","rdx"],"terminator":"ret","max_stack_delta":32,"forbid":["memory_write","unknown"]}}' \
-  | ropcatalog libc.ropcatalog --batch - --jsonl --limit 3
-```
-
-Parse a large extractor dump once, then reuse the compact catalog for fast repeated queries:
-
-```shell
-ROPgadget --binary ./target | ropcatalog --catalog-out target.ropcatalog
-ropcatalog target.ropcatalog --serve --fields id,module,address,raw,semantics
-```
-
-`--serve` keeps the catalog loaded and reads the same JSON request records from standard input. It emits and flushes one JSON response per request. `--fields` removes unused gadget fields for lower output volume. Routine diagnostics are suppressed for JSONL and served output unless `--verbose` is used.
-
-A plan is an ordered list of exact or semantic gadget requests. `values` names registers that stay live across later steps, so ropcatalog automatically rejects candidates that clobber them. The result contains one selected gadget per step, its stack pops, extra stack consumption, and static effect verification:
-
-```json
-{"id":"call","alignment":{"modulus":16,"initial":8,"final":8},"plan":[{"command":"pop rdi","values":{"rdi":"<arg0>"}},{"command":"pop rsi","values":{"rsi":"<arg1>"}}]}
-```
-
-The verifier is conservative and syntactic. It reports dynamic stack changes and unmodelled instructions. It does not claim that a text-only gadget dump is equivalent to emulating the target binary.
-
-Use `--artifact-dir` to retain deterministic module-named results without writing JSONL to stdout. Name the rp++ source `<module>.txt`; this example writes `artifacts/libphp.so.ropcatalog.jsonl`:
-
-```shell
-ropcatalog libphp.so.txt --batch queries.jsonl --jsonl --artifact-dir artifacts
-```
-
-## 🧸 Usage
-
-```
-ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o] [-e ENCODING] [--address-kind {unknown,rva,va}] [-c COMMAND | -q QUERY | --batch PATH | --serve] [--jsonl] [--limit LIMIT] [--artifact-dir ARTIFACT_DIR] [--catalog-out CATALOG_OUT] [--stdin-module NAME] [--fields FIELD,...] [--capabilities] [--verbose] [paths ...]
-```
-
-| Flag | Description |
-|------|-------------|
-| `paths` | rp++, ROPgadget, Ropper, or reusable catalog files/directories; required unless extractor output is piped to a non-interactive query or `--catalog-out` |
-| `-b`, `--bad-characters` | Exclude addresses containing these bytes (e.g., `\x00\x0a\x0d`) |
-| `-a`, `--all` | Disable uniqueness filtering (show all duplicate gadgets) |
-| `-s`, `--style` | Output format: `plain`, `python`, `js`, `cpp` |
-| `-o`, `--offset` | Prefix addresses with base address variable (for ASLR rebasing) |
-| `-e`, `--encoding` | Force file encoding (auto-detected if not set) |
-| `--address-kind` | Mark source addresses as `unknown`, `rva`, or `va`; `--offset` rejects `va` sources |
-| `-c`, `--command` | Run a single command and exit (useful for piping output) |
-| `-q`, `--query` | Run an exact gadget query and exit; repeat to execute multiple queries |
-| `--batch` | Read queries from a UTF-8 file, or `-` for standard input; mutually exclusive with `--command` and `--query` |
-| `--jsonl` | Emit one JSON object per query to stdout unless `--artifact-dir` is used, suitable for `jq` pipelines or agents |
-| `--limit` | Return at most this many gadgets per query while retaining the total count; requires a non-interactive query mode |
-| `--artifact-dir` | Write module-named JSONL files instead of stdout and suppress routine diagnostics; requires `--jsonl`, a query mode, and the `module` field when `--fields` is used |
-| `--catalog-out` | Write a reusable `ropcatalog.catalog.v1` gadget catalog and exit; cannot be combined with query output options |
-| `--stdin-module` | Name an extractor source read from standard input |
-| `--serve` | Keep a file-backed catalog loaded and answer JSONL requests on standard input |
-| `--fields` | Select gadget fields for JSONL or served output |
-| `--capabilities` | Print supported inputs, query records, constraints, fields, and schemas as JSON |
-| `--verbose` | Keep routine diagnostics with machine-readable output |
-
-JSONL gadget records include stable `id` and `source_id` values, `module`, `address`, `address_kind`, `arch`, optional opcode `bytes`, `instructions`, syntactic `semantics`, `raw`, and the selected copy-paste `formatted` representation. Results are ranked by explicit quality score, shortest and lowest-side-effect first. IDs stay stable while source content stays identical.
-
-## 🎮 REPL Commands
-
-Once inside the interactive REPL, the following commands are available. Type `help` for the full list.
-
-### 🔍 Search
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `?` | Exact search | `? pop eax ; ret` |
-| `/` | Partial search | `/ pop` |
-| `.` | Regex search | `. mov.*rax` |
-| `memoff` | Memory offset search | `memoff rbx+0x20` |
-
-### 📝 Register Operations
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `copy` | Copy register to another | `copy rax` |
-| `copyto` / `mov` | Copy into register | `copyto r9` |
-| `save` | Save register (no modification of either) | `save rbx` |
-| `saveto` | Save into register (with mode filter) | `saveto eax imm` |
-| `swap` | Swap two registers | `swap eax` |
-| `zero` | Zero a register | `zero rax` |
-| `inc` / `dec` | Increment/decrement register | `inc eax` |
-| `add` / `sub` | Register arithmetic | `add rax rsi` |
-
-### 💾 Memory Operations
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `read` / `deref` | Read from memory pointer | `read rbx` |
-| `writereg` | Write register to memory | `writereg rcx` |
-| `writeptr` | Write to memory pointer | `writeptr rax` |
-| `writebyte` | Write byte to pointer | `writebyte rax` |
-| `addmem` / `submem` | Add/subtract memory value | `addmem rax rcx` |
-| `incmem` / `decmem` | Increment/decrement memory | `incmem rax` |
-
-### 🔀 Stack and Control Flow
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `push` / `pop` | Stack push/pop | `pop rbx` |
-| `ppr` | Pop-pop-ret sequences | `ppr` |
-| `pivot` | Stack pivot gadgets | `pivot reg` |
-| `jump` | Jump to register | `jump esp` |
-| `call` | Indirect call | `call rax` |
-| `transition` | Kernel-to-user transition (swapgs/iretq) | `transition` |
-| `syscall` | Syscall/sysenter gadgets | `syscall` |
-| `nop` / `funcnop` | NOP/functional NOP padding | `nop` |
-| `loadcr` | Load control register | `loadcr rcx` |
-
-### 🏷️ Modifiers
-
-Append these flags to any command:
-
-| Flag | Effect | Example |
-|------|--------|---------|
-| `/n` | Disable unstable operation filtering (show all gadgets) | `copyto rax /n` |
-| `/v` | Filter for volatile (caller-saved) registers only | `copy rax /v` |
-
-Both flags can be combined: `copy rax /v /n`
-
-## 🎨 Output Styles
-
-The `--style` flag (or `style` REPL command) controls how gadgets are formatted for copy-paste into exploits:
-
-**Plain** (default):
-```
-0x10001000 # pop eax ; ret [libeay32IBM019]
-```
-
-**Python** (`-s python`):
 ```python
-rop += pack("<L", 0x10001000) # pop eax ; ret [libeay32IBM019]
+rop += pack("<L", ba__target + 0x10001000) # pop eax ; ret [target]
 ```
 
-**C++** (`-s cpp`):
-```cpp
-*rop++ = 0x10001000; // pop eax ; ret [libeay32IBM019]
+## Scripts And AI Agents
+
+The machine interface is designed to avoid repeatedly loading a large gadget dump into context. Parse once, request only the fields needed for the current decision, and retain stable IDs for follow-up queries or chain changes.
+
+### Batch Queries
+
+`--batch` accepts one UTF-8 request per line. Plain lines are exact gadget queries. JSON objects support exact queries, semantic commands, constraints, fixed plans, synthesis, and stable-ID lookup:
+
+```jsonl
+pop rdi ; ret
+{"id":"pivot","command":"pivot reg"}
+{"id":"arg0","command":"pop rdi","constraints":{"preserve":["rsi","rdx"],"terminator":"ret","max_stack_delta":32,"forbid":["memory_write","unknown"]}}
 ```
 
-**JavaScript** (`-s js`):
-```javascript
-writePtr(ropBuffer + ropIndex * 8, 0x10001000); ropIndex++; // pop eax ; ret [libeay32IBM019]
+```shell
+ropcatalog target.txt --batch requests.jsonl --jsonl --limit 10
 ```
 
-With `--offset`, addresses are prefixed with a base address variable for ASLR rebasing:
+Each response reports the total match count, bounded results, selected ranking, and rejection counts. Rejected requests include relaxed alternatives when useful. Gadget records can contain source provenance, architecture, address kind, opcode bytes, register assignments, stack/control/memory effects, contextual cost, and copy-paste output.
 
-![copy ESP with ASLR offset](./media/copy_esp_ASLR.png)
+Use `--fields` to reduce output volume:
 
-## 🛡️ Stability Filtering
+```shell
+ropcatalog target.ropcatalog --batch requests.jsonl --jsonl --fields id,module,address,raw,semantics
+```
 
-By default, `ropcatalog` filters out gadgets containing unstable operations that would break a ROP chain:
+### Reusable Catalogs
 
-- Conditional and unconditional jumps (`jz`, `jmp`, `loop`, ...)
-- Interrupts and traps (`int3`, `hlt`, `ud2`, ...)
-- Privileged instructions (`cli`, `sti`, `in`, `out`, ...)
-- Large `retn` values (stack shifts above 40 bytes)
-- Uncontrolled `call` instructions (direct calls to addresses are filtered; indirect calls through controlled registers like `call rax` are kept)
+Save extractor output in `ropcatalog.catalog.v1` format:
 
-Use the `/n` modifier to temporarily include filtered gadgets in search results.
+```shell
+ROPgadget --binary ./target | ropcatalog --stdin-module target --address-kind rva --catalog-out target.ropcatalog
+```
 
-## 📸 Screenshots
+Use `--serve` when a long-running process needs many sequential requests. The catalog stays in memory and one flushed JSON response is emitted for each input line:
 
-Searching for gadgets that dereference `ESI`:
+```shell
+ropcatalog target.ropcatalog --serve --fields id,module,address,address_kind,raw,semantics
+```
 
-![deref esi](./media/deref_esi.png)
+By default, `--jsonl` writes only JSONL to standard output and suppresses routine diagnostics. `--artifact-dir` writes module-named `.ropcatalog.jsonl` files instead of printing results. `--verbose` intentionally restores diagnostic text and cannot be combined with `--artifact-dir`.
 
-Searching for gadgets that zero `EAX`:
+```shell
+ropcatalog target.txt --batch requests.jsonl --jsonl --artifact-dir artifacts
+```
 
-![zero eax](./media/zero_eax.png)
+### Chain Synthesis
 
-## ⚠️ Disclaimer
+Use a `synthesize` request when the required result is a chain rather than an individual gadget. Declare register values, memory writes, a direct ABI call, or an indirect transition. Search limits keep work bounded and reproducible.
 
-**This tool is provided strictly for security research, education, and authorized penetration testing.** You must have **explicit written authorization** before running this software against any system you do not own.
+```jsonl
+{"id":"protect","synthesize":{"profile":"windows-x64","call":{"module":"kernel32.dll","address":"0x12340","address_kind":"rva","arguments":["0x41410000","0x1000","0x40","0x41411000"]},"bases":{"kernel32.dll":"0x7ffb12340000"},"scratch":["0x41412000"],"search":{"beam_width":32,"max_depth":8,"max_nodes":5000,"per_effect":16},"emit":["python","pwntools"]}}
+```
 
-This tool is designed for educational purposes only and is intended to assist security professionals during Windows exploit development courses and authorized engagements.
+The result includes:
 
-Acceptable environments include:
-- Private lab environments you control (local VMs, isolated networks).
-- Sanctioned learning platforms (CTFs, Hack The Box, OffSec exam scenarios).
-- Formal penetration-test or red-team engagements with documented customer consent.
+- ordered gadgets and stable IDs;
+- register state before and after each gadget;
+- chain words, stack frames, padding, relocations, and ABI stack requirements;
+- satisfied postconditions, unresolved assumptions, and target-clobber information;
+- cost vectors, rejected candidates, and non-dominated alternatives;
+- mitigation issues for CET, CFG, KPTI, SMEP, and SMAP when requested.
 
-Misuse of this project may result in legal action.
+Use `{"gadget_id":"<id>"}` to retrieve a previous gadget exactly. Resubmit a synthesis request with selected IDs in `locked` to preserve or replace individual choices without depending on result order.
 
-## ⚖️ Legal Notice
+`verify:"syntactic"` is the dependency-free default. `verify:"bytes"` optionally re-disassembles extractor opcode bytes with Capstone. `verify:"emulate"` optionally executes a fully resolved local chain with bounded Unicorn emulation and validates concrete register postconditions. If bytes, module bases, or concrete values are unavailable, the verification result states that limitation rather than claiming execution.
 
-Any unauthorized use of this tool in real-world environments or against systems without explicit permission from the system owner is strictly prohibited and may violate legal and ethical standards. The creators and contributors of this tool are not responsible for any misuse or damage caused.
+The synthesizer is conservative. It does not model every instruction or prove that a chain works in the complete target process. Review dynamic stack behavior, unresolved relocations, writable-memory assumptions, and mitigation-specific transitions before using emitted exploit code.
 
-Use responsibly and ethically. Always respect the law and obtain proper authorization.
+## Filtering And Ranking
+
+Default stability filtering removes candidates that are normally unsuitable inside a chain:
+
+- conditional or uncontrolled control transfers;
+- interrupts, traps, halts, and privileged instructions;
+- oversized `retn` stack adjustments;
+- unmodelled instructions when forbidden by a constraint or by synthesis.
+
+Bad-character filtering applies to each gadget address. Duplicate instruction sequences are removed per module unless `--all` is set. Semantic queries reject candidates that clobber requested values or violate stack, memory, terminator, architecture, or control-flow constraints.
+
+Ranks are deterministic. They prefer shorter gadgets and lower stack, register, memory, control-flow, and uncertainty costs for the current goal. Pareto IDs expose candidates with side-effect tradeoffs that a single scalar rank would hide.
+
+## CLI Reference
+
+```text
+ropcatalog [-h] [-b BAD_CHARACTERS] [-a] [-s {plain,python,js,cpp}] [-o]
+           [-e ENCODING] [--address-kind {unknown,rva,va}]
+           [-c COMMAND | -q QUERY | --batch PATH | --serve] [--jsonl]
+           [--limit LIMIT] [--artifact-dir ARTIFACT_DIR]
+           [--catalog-out CATALOG_OUT] [--stdin-module NAME]
+           [--fields FIELD,...] [--capabilities] [--verbose] [paths ...]
+```
+
+| Argument | Description |
+| --- | --- |
+| `paths` | Extractor dumps, reusable catalogs, or directories. Use `-` for gadget input on standard input. |
+| `-b`, `--bad-characters` | Exclude addresses containing specified bytes, for example `\x00\x0a\x0d`. |
+| `-a`, `--all` | Disable per-module instruction uniqueness filtering. |
+| `-s`, `--style` | Select `plain`, `python`, `js`, or `cpp` output. |
+| `-o`, `--offset` | Emit base-relative addresses. Rejected for sources marked as `va`. |
+| `-e`, `--encoding` | Force source encoding instead of auto-detection. |
+| `--address-kind` | Mark extractor addresses as `unknown`, `rva`, or `va`. |
+| `-c`, `--command` | Run one semantic command and exit. |
+| `-q`, `--query` | Run one exact query and exit. Repeat for multiple queries. |
+| `--batch` | Read plain or JSON requests from a file. Use `-` for request input on standard input. |
+| `--serve` | Keep a file-backed catalog loaded and read JSON requests from standard input. |
+| `--jsonl` | Emit one JSON response per query, suitable for `jq` and agent pipelines. |
+| `--limit` | Bound returned gadgets while retaining total-match metadata. |
+| `--artifact-dir` | Write JSONL results to `<module>.ropcatalog.jsonl` rather than standard output. |
+| `--catalog-out` | Save a reusable parsed catalog and exit. |
+| `--stdin-module` | Name an extractor source read from standard input. |
+| `--fields` | Select fields in JSONL responses. |
+| `--capabilities` | Print the complete machine-readable interface contract. |
+| `--verbose` | Keep routine diagnostics in machine-readable modes. |
+
+Input/output arguments that compete for standard input or produce incompatible output are rejected by `argparse`. In particular, standard input cannot carry both a gadget stream and `--batch -`, and `--catalog-out`, `--artifact-dir`, interactive mode, and `--serve` have separate output contracts.
+
+## Development
+
+```shell
+uv run pytest
+```
+
+## License And Authorized Use
+
+GPL-3.0-only. Use `ropcatalog` against binaries and systems you own or are authorized to assess, including private labs, CTFs, OffSec exam environments, and documented security engagements.
