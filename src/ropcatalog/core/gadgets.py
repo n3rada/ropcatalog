@@ -38,7 +38,7 @@ class Gadget:
         "jecxz", "jrcxz",
 
         # Unconditional control flow
-        "jmp", "loop", "loopne", "loope",
+        "loop", "loopne", "loope",
 
         # Interrupts and traps
         "int3", "int1", "int ", "into", "ud2",
@@ -71,12 +71,18 @@ class Gadget:
         source_id: str | None = None,
         bytes_hex: str | None = None,
         address_kind: str = "unknown",
+        extractor: str = "unknown",
+        extractor_version: str | None = None,
+        source_sha256: str | None = None,
     ):
         self._arch = arch.lower()
         self._address = f"0x{int(address, 16):x}"
         self._module = module
         self._source_id = source_id or module
         self._address_kind = address_kind
+        self._extractor = extractor
+        self._extractor_version = extractor_version
+        self._source_sha256 = source_sha256 or source_id
         normalized = re.sub(r"\s{2,}", " ", raw_string.strip().lower())
         dump_match = re.search(r"\s+//\s*([0-9a-f]+)$", normalized)
         rp_bytes_match = re.search(r"(?:;\s*)?((?:\\x[0-9a-f]{2})+)$", normalized)
@@ -109,10 +115,22 @@ class Gadget:
         """Check if register or its sub-registers are modified"""
 
         sub_registers = registers.get_sub_registers(self._arch)
-        registers_to_check = sub_registers.get(reg, [reg])
+        canonical = registers.canonical_register(reg, self._arch)
+        registers_to_check = sub_registers.get(canonical, [canonical])
 
         for instr in instructions:
             instr_lower = instr.strip().lower()
+            mnemonic = instr_lower.split(maxsplit=1)[0]
+
+            implicit_writes = {
+                "cpuid": {"rax", "rbx", "rcx", "rdx", "eax", "ebx", "ecx", "edx"},
+                "div": {"rax", "rdx", "eax", "edx"},
+                "idiv": {"rax", "rdx", "eax", "edx"},
+                "rdtsc": {"rax", "rdx", "eax", "edx"},
+                "rdtscp": {"rax", "rcx", "rdx", "eax", "ecx", "edx"},
+            }
+            if canonical in implicit_writes.get(mnemonic, set()):
+                return True
 
             # Check for pop instruction
             if instr_lower.startswith("pop "):
@@ -151,20 +169,10 @@ class Gadget:
             if op in self._raw:
                 return True
 
-        # Special handling for "call"
-        if re.search(r"\bcall\b", self._raw, re.IGNORECASE):
-            # Allow indirect calls to controlled registers
-            controlled_calls = [
-                r"\bcall\s+(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)\b",  # call rax
-                r"\bcall\s+\[(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)",  # call [rax]
-                r"\bcall\s+qword\s+ptr\s+\[(rax|rbx|rcx|rdx|rsi|rdi|rbp|r8|r9|r10|r11|r12|r13|r14|r15)",  # call qword ptr [rax]
-            ]
-
-            # If it's a controlled indirect call, allow it
-            if any(re.search(pattern, self._raw, re.IGNORECASE) for pattern in controlled_calls):
-                return False  # Not a bad op
-
-            return True   # Direct call or uncontrolled - bad op
+        for instruction in self._instructions:
+            mnemonic = instruction.split(maxsplit=1)[0]
+            if mnemonic in {"call", "jmp"} and not self._is_controlled_transfer(instruction):
+                return True
 
         # Check for large retn values
         if match := re.search(r"\bret(?:n)?\s+0x([0-9a-fA-F]+)", self._raw):
@@ -178,9 +186,17 @@ class Gadget:
 
         return False
 
+    def _is_controlled_transfer(self, instruction: str) -> bool:
+        target = instruction.split(maxsplit=1)[1] if " " in instruction else ""
+        return any(
+            registers.is_register(register, self._arch)
+            for register in re.findall(r"\b[a-z][a-z0-9]*\b", target)
+        )
+
     def has_bad_chars_in_address(self, bad_chars: list) -> bool:
         address = self._address[2:]
-        address = address.zfill(len(address) + len(address) % 2)
+        width = 16 if self._arch == "x64" else 8
+        address = address.zfill(max(width, len(address) + len(address) % 2))
         for byte in [address[index: index + 2] for index in range(0, len(address), 2)]:
             if byte in bad_chars:
                 return True
@@ -276,6 +292,23 @@ class Gadget:
     @property
     def address_kind(self) -> str:
         return self._address_kind
+
+    @property
+    def identifier(self) -> str:
+        identity = f"{self._source_id}\0{self._arch}\0{self._address}\0{self._raw}"
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+
+    @property
+    def extractor(self) -> str:
+        return self._extractor
+
+    @property
+    def extractor_version(self) -> str | None:
+        return self._extractor_version
+
+    @property
+    def source_sha256(self) -> str | None:
+        return self._source_sha256
 
 
 class Gadgets:
@@ -405,7 +438,9 @@ class Gadgets:
 
         bad_char_count = 0
         results = []
-        source_id = hashlib.sha256(file_content.encode("utf-8")).hexdigest()[:16]
+        source_sha256 = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
+        source_id = source_sha256[:16]
+        extractor, extractor_version = _detect_extractor(file_content)
 
         for match in gadget_pattern.finditer(file_content):
             gadget = Gadget(
@@ -415,6 +450,9 @@ class Gadgets:
                 arch=arch,
                 source_id=source_id,
                 address_kind=self._address_kind,
+                extractor=extractor,
+                extractor_version=extractor_version,
+                source_sha256=source_sha256,
             )
             if self._bad_characters and gadget.has_bad_chars_in_address(self._bad_characters):
                 bad_char_count += 1
@@ -445,6 +483,9 @@ class Gadgets:
                     source_id=record["source_id"],
                     bytes_hex=record.get("bytes"),
                     address_kind=record.get("address_kind", "unknown"),
+                    extractor=record.get("extractor", "unknown"),
+                    extractor_version=record.get("extractor_version"),
+                    source_sha256=record.get("source_sha256"),
                 )
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
                 raise ValueError(f"invalid catalog record on line {line_number}: {error}") from error
@@ -469,8 +510,13 @@ class Gadgets:
                     "address": gadget.address,
                     "address_kind": gadget.address_kind,
                     "arch": gadget.arch,
+                    "extractor": gadget.extractor,
                     "raw": gadget.raw,
                 }
+                if gadget.extractor_version is not None:
+                    record["extractor_version"] = gadget.extractor_version
+                if gadget.source_sha256 is not None:
+                    record["source_sha256"] = gadget.source_sha256
                 if gadget.bytes_hex is not None:
                     record["bytes"] = gadget.bytes_hex
                 print(json.dumps(record, separators=(",", ":"), sort_keys=True), file=stream)
@@ -486,4 +532,15 @@ class Gadgets:
     @property
     def full_count(self) -> int:
         return len(self._full_list)
+
+
+def _detect_extractor(file_content: str) -> tuple[str, str | None]:
+    version_match = re.search(r"rp\+\+\s+v(?:ersion\s*)?([0-9][^\s.]*(?:\.[0-9]+)*)", file_content, re.IGNORECASE)
+    if "rp++" in file_content.lower() or "you decided to keep only the unique ones" in file_content.lower():
+        return "rp++", version_match.group(1) if version_match else None
+    if "ropgadget" in file_content.lower() or "gadgets information" in file_content.lower():
+        return "ROPgadget", None
+    if "ropper" in file_content.lower() or "gadgets\n=======\n" in file_content.lower():
+        return "Ropper", None
+    return "unknown", None
 

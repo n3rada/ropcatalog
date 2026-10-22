@@ -95,6 +95,40 @@ class TestSemantics:
         ret_gadget = make_gadget(raw="pop rdi ; ret", arch="x64")
         assert sort_key(ret_gadget) < sort_key(call_gadget)
 
+    def test_symbolic_assignments_and_partial_writes(self, make_gadget):
+        gadget = make_gadget(raw="pop rax ; mov ecx, eax ; mov ax, dx ; ret", arch="x64")
+        assert gadget.semantics["assignments"]["rcx"] == {"kind": "register", "value": "rax"}
+        assert gadget.semantics["assignments"]["rax"]["kind"] == "partial"
+        details = {item["register"]: item for item in gadget.semantics["register_write_details"]}
+        assert details["rcx"]["zero_extends"] is True
+        assert details["rax"]["width"] == 16
+
+    def test_memory_effect_carries_written_value(self, make_gadget):
+        gadget = make_gadget(raw="mov qword ptr [rax], rdi ; ret", arch="x64")
+        assert gadget.semantics["memory_effects"]["writes"] == [{
+            "address": "[rax]", "value": {"kind": "register", "value": "rdi"}, "width": 64,
+        }]
+
+    def test_control_effects_model_syscall_and_iret(self, make_gadget):
+        syscall = make_gadget(raw="syscall", arch="x64")
+        iret = make_gadget(raw="swapgs ; iretq", arch="x64")
+        assert {"rcx", "r11"}.issubset(syscall.semantics["register_writes"])
+        assert iret.semantics["control_effects"][-1]["frame"] == ["ip", "cs", "flags", "sp", "ss"]
+        assert iret.semantics["stack_delta"] == 40
+
+    def test_pushad_and_popad_effects(self, make_gadget):
+        pushad = make_gadget(raw="pushad ; ret", arch="x86")
+        popad = make_gadget(raw="popad ; ret", arch="x86")
+        assert pushad.semantics["unknown"] == []
+        assert pushad.semantics["stack_delta"] is None
+        assert popad.semantics["stack_delta"] == 36
+        assert popad.semantics["assignments"]["eax"] == {"kind": "stack", "offset": 28}
+
+    def test_rp_low_register_alias(self, make_gadget):
+        gadget = make_gadget(raw="mov r14l, r14l ; ret", arch="x64")
+        assert gadget.semantics["register_writes"] == ["r14"]
+        assert gadget.semantics["register_write_details"][0]["width"] == 8
+
 
 class TestExactMatch:
     def test_exact_match_true(self, make_gadget):
@@ -156,7 +190,7 @@ class TestUnstableOps:
     @pytest.mark.parametrize(
         "raw",
         [
-            "jmp eax ; ret",
+            "jmp 0x12345 ; ret",
             "int3 ; ret",
             "hlt ; ret",
             "jz label ; ret",
@@ -201,6 +235,10 @@ class TestUnstableOps:
         g = make_gadget(raw="call rax ; ret", arch="x64")
         assert g.has_unstable_op() is False
 
+    @pytest.mark.parametrize("raw", ["call eax ; ret", "call [eax+0x10] ; ret", "jmp esp"])
+    def test_x86_indirect_transfers_stable(self, make_gadget, raw):
+        assert make_gadget(raw=raw, arch="x86").has_unstable_op() is False
+
     def test_iretq_without_swapgs_unstable(self, make_gadget):
         g = make_gadget(raw="iretq", arch="x64")
         assert g.has_unstable_op() is True
@@ -230,6 +268,10 @@ class TestBadChars:
     def test_short_address_is_padded_to_a_byte(self, make_gadget):
         g = make_gadget(address="0x1")
         assert g.has_bad_chars_in_address(["01"]) is True
+
+    def test_short_address_includes_architecture_padding(self, make_gadget):
+        g = make_gadget(address="0x414141", arch="x86")
+        assert g.has_bad_chars_in_address(["00"]) is True
 
 
 class TestPushCoherence:

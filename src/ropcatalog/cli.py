@@ -2,7 +2,6 @@
 import argparse
 from collections import Counter
 from dataclasses import dataclass, field
-import hashlib
 import io
 import json
 import re
@@ -15,6 +14,8 @@ from .core import registers
 from .core import utils
 from .core import formatters
 from .core import terminal
+from .core import synthesis
+from .core import verification
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,18 @@ class Plan:
     identifier: str
     steps: tuple[PlanStep, ...]
     alignment: dict | None = None
+
+
+@dataclass(frozen=True)
+class Synthesis:
+    identifier: str
+    specification: dict
+
+
+@dataclass(frozen=True)
+class GadgetLookup:
+    identifier: str
+    gadget_id: str
 
 
 class RopCatalogArgumentParser(argparse.ArgumentParser):
@@ -109,8 +122,9 @@ def positive_integer(value: str) -> int:
 
 def output_fields(value: str) -> tuple[str, ...]:
     available = {
-        "address", "address_kind", "arch", "bytes", "formatted", "id", "instructions", "module",
-        "raw", "semantics", "source_id",
+        "address", "address_kind", "arch", "bytes", "cost", "extractor", "extractor_version",
+        "formatted", "id", "instructions", "module", "raw", "semantics", "source_id",
+        "source_sha256",
     }
     fields = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
     unsupported = sorted(set(fields) - available)
@@ -299,10 +313,22 @@ def _parse_batch_line(line: str, line_number: int):
     has_query = "query" in request
     has_command = "command" in request
     has_plan = "plan" in request
-    if sum((has_query, has_command, has_plan)) != 1:
+    has_synthesis = "synthesize" in request
+    has_lookup = "gadget_id" in request
+    if sum((has_query, has_command, has_plan, has_synthesis, has_lookup)) != 1:
         raise ValueError(
-            f"batch line {line_number} requires exactly one of 'query', 'command', or 'plan'"
+            f"batch line {line_number} requires exactly one of 'query', 'command', 'plan', 'synthesize', or 'gadget_id'"
         )
+    if has_synthesis:
+        if set(request) - {"id", "synthesize"}:
+            raise ValueError(f"batch line {line_number} synthesis accepts only 'id' and 'synthesize'")
+        return _parse_synthesis(request, line_number)
+    if has_lookup:
+        if set(request) - {"id", "gadget_id"}:
+            raise ValueError(f"batch line {line_number} gadget lookup accepts only 'id' and 'gadget_id'")
+        if not isinstance(request["gadget_id"], str) or not re.fullmatch(r"[0-9a-fA-F]{16}", request["gadget_id"]):
+            raise ValueError(f"batch line {line_number} gadget_id must be a 16-character hexadecimal ID")
+        return GadgetLookup(str(request.get("id", line_number)), request["gadget_id"].lower())
     if has_plan:
         unexpected = sorted(set(request) - {"alignment", "id", "plan"})
         if unexpected:
@@ -363,11 +389,216 @@ def _parse_plan(request: dict, line_number: int) -> Plan:
     return Plan(str(request.get("id", line_number)), tuple(parsed_steps), alignment)
 
 
-def gadget_to_record(gadget, formatter, with_base_address: bool, fields=None) -> dict:
-    identity = f"{gadget.source_id}\0{gadget.arch}\0{gadget.address}\0{gadget.raw}"
+def _parse_synthesis(request: dict, line_number: int) -> Synthesis:
+    value = request["synthesize"]
+    if not isinstance(value, dict):
+        raise ValueError(f"batch line {line_number} synthesize must be an object")
+    allowed = {
+        "bad_bytes", "bases", "call", "constraints", "emit", "filler", "locked", "max_words",
+        "mitigations", "postconditions", "profile", "scratch", "search", "set",
+        "transition", "verify", "write",
+    }
+    unexpected = sorted(set(value) - allowed)
+    if unexpected:
+        raise ValueError(f"batch line {line_number} synthesis has unsupported keys: {', '.join(unexpected)}")
+
+    profile = value.get("profile", "none")
+    if profile not in synthesis.ABI_ARGUMENTS:
+        raise ValueError(f"batch line {line_number} synthesis has unsupported profile '{profile}'")
+    constraints = _parse_constraints(value.get("constraints"), line_number)
+    profile_arch = "x64" if "x64" in profile else ("x86" if profile == "x86-cdecl" else None)
+    if profile_arch and constraints.get("arch") and constraints["arch"] != [profile_arch]:
+        raise ValueError(f"batch line {line_number} synthesis profile conflicts with architecture constraint")
+    if profile_arch:
+        constraints["arch"] = [profile_arch]
+    constraints["forbid"] = sorted(set(constraints.get("forbid", [])) | {"unknown"})
+
+    postconditions = value.get("postconditions", {})
+    if not isinstance(postconditions, dict) or set(postconditions) - {"set", "write"}:
+        raise ValueError(f"batch line {line_number} postconditions accepts only set and write")
+    set_values = _parse_set(value.get("set", {}), line_number)
+    for register, target in _parse_set(postconditions.get("set", {}), line_number).items():
+        if register in set_values and set_values[register] != target:
+            raise ValueError(f"batch line {line_number} has conflicting set value for {register}")
+        set_values[register] = target
+    writes = _parse_writes(value.get("write", []), line_number)
+    writes.extend(_parse_writes(postconditions.get("write", []), line_number))
+    transition = _parse_transition(value.get("transition"), line_number)
+    call = _parse_call(value.get("call"), line_number)
+    if transition and call:
+        raise ValueError(f"batch line {line_number} synthesis cannot combine transition and direct call")
+    if not set_values and not writes and not transition and not call:
+        raise ValueError(f"batch line {line_number} synthesis requires at least one goal")
+
+    bases = value.get("bases", {})
+    if not isinstance(bases, dict) or not all(
+        isinstance(module, str) and module and isinstance(base, (str, int)) and not isinstance(base, bool)
+        for module, base in bases.items()
+    ):
+        raise ValueError(f"batch line {line_number} bases must map module names to strings or integers")
+    mitigations = value.get("mitigations", [])
+    if isinstance(mitigations, str):
+        mitigations = [mitigations]
+    if not isinstance(mitigations, list) or set(mitigations) - {"cet", "cfg", "kpti", "smap", "smep"}:
+        raise ValueError(f"batch line {line_number} mitigations must contain cet, cfg, kpti, smap, or smep")
+    emit = value.get("emit", [])
+    if isinstance(emit, str):
+        emit = [emit]
+    if not isinstance(emit, list) or set(emit) - {"python", "pwntools"}:
+        raise ValueError(f"batch line {line_number} emit must contain python or pwntools")
+    verify = value.get("verify", "syntactic")
+    if verify not in {"bytes", "emulate", "syntactic"}:
+        raise ValueError(f"batch line {line_number} verify must be bytes, emulate, or syntactic")
+    search = _parse_search(value.get("search"), line_number)
+    max_words = value.get("max_words", 256)
+    if not isinstance(max_words, int) or isinstance(max_words, bool) or max_words < 1:
+        raise ValueError(f"batch line {line_number} max_words must be a positive integer")
+    specification = {
+        "abi": profile,
+        "bad_bytes": _parse_bad_bytes(value.get("bad_bytes", []), line_number),
+        "bases": bases,
+        "call": call,
+        "constraints": constraints,
+        "emit": emit,
+        "filler": value.get("filler", "<filler>"),
+        "locked": _parse_locked(value.get("locked", []), line_number),
+        "max_words": max_words,
+        "mitigations": sorted(set(mitigations)),
+        "scratch": _parse_scratch(value.get("scratch", []), line_number),
+        "search": search,
+        "set": set_values,
+        "transition": transition,
+        "verify": verify,
+        "write": writes,
+    }
+    return Synthesis(str(request.get("id", line_number)), specification)
+
+
+def _parse_set(value, line_number):
+    if not isinstance(value, dict):
+        raise ValueError(f"batch line {line_number} set must be an object keyed by general register")
+    if not all(
+        isinstance(register, str)
+        and (registers.is_register(register, "x64") or registers.is_register(register, "x86"))
+        and isinstance(target, (str, int)) and not isinstance(target, bool)
+        for register, target in value.items()
+    ):
+        raise ValueError(f"batch line {line_number} set must map general registers to strings or integers")
+    return {register.lower().strip(): target for register, target in value.items()}
+
+
+def _parse_writes(value, line_number):
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        raise ValueError(f"batch line {line_number} write must be an object or list")
+    results = []
+    for goal in value:
+        if not isinstance(goal, dict) or not {"address", "value"}.issubset(goal) or set(goal) - {"address", "value", "width"}:
+            raise ValueError(f"batch line {line_number} write requires address, value, and optional width")
+        if not isinstance(goal["address"], str) or not goal["address"].strip():
+            raise ValueError(f"batch line {line_number} write address must be a string")
+        expected = goal["value"]
+        if isinstance(expected, dict):
+            if set(expected) != {"register"} or not isinstance(expected["register"], str):
+                raise ValueError(f"batch line {line_number} write register value is invalid")
+        elif not isinstance(expected, (str, int)) or isinstance(expected, bool):
+            raise ValueError(f"batch line {line_number} write value must be a register object, string, or integer")
+        width = goal.get("width")
+        if width not in {None, 8, 16, 32, 64}:
+            raise ValueError(f"batch line {line_number} write width must be 8, 16, 32, or 64")
+        results.append(dict(goal, address=goal["address"].lower().strip()))
+    return results
+
+
+def _parse_transition(value, line_number):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or "kind" not in value or set(value) - {"frame", "kind", "target"}:
+        raise ValueError(f"batch line {line_number} transition requires kind and optional target")
+    if value["kind"] not in synthesis.SUPPORTED_CONTROLS:
+        raise ValueError(f"batch line {line_number} transition kind is unsupported")
+    target = value.get("target")
+    if target is not None and (
+        not isinstance(target, dict) or set(target) != {"register"}
+        or not isinstance(target["register"], str)
+    ):
+        raise ValueError(f"batch line {line_number} transition target must be a register object")
+    frame = value.get("frame")
+    if frame is not None:
+        expected = {"ip", "cs", "flags", "sp", "ss"}
+        if value["kind"] not in {"iret", "iretd", "iretq"} or not isinstance(frame, dict) or set(frame) != expected:
+            raise ValueError(f"batch line {line_number} iret frame requires ip, cs, flags, sp, and ss")
+        if not all(isinstance(item, (str, int)) and not isinstance(item, bool) for item in frame.values()):
+            raise ValueError(f"batch line {line_number} iret frame values must be strings or integers")
+    return value
+
+
+def _parse_call(value, line_number):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {"address", "address_kind", "arguments", "module", "return", "symbol"}:
+        raise ValueError(f"batch line {line_number} direct call is invalid")
+    if ("address" in value) == ("symbol" in value):
+        raise ValueError(f"batch line {line_number} direct call requires exactly one of address or symbol")
+    result = dict(value)
+    if "address" in value:
+        if not isinstance(value["address"], str) or not re.fullmatch(r"0x[0-9a-fA-F]+", value["address"]):
+            raise ValueError(f"batch line {line_number} direct call address must be hexadecimal")
+        if value.get("address_kind", "rva") not in {"rva", "va"}:
+            raise ValueError(f"batch line {line_number} direct call address_kind must be rva or va")
+        result["address_kind"] = value.get("address_kind", "rva")
+    elif not isinstance(value["symbol"], str) or not value["symbol"].strip():
+        raise ValueError(f"batch line {line_number} direct call symbol must be non-empty")
+    arguments = value.get("arguments", [])
+    if not isinstance(arguments, list) or not all(isinstance(argument, (str, int)) and not isinstance(argument, bool) for argument in arguments):
+        raise ValueError(f"batch line {line_number} direct call arguments must be a list of strings or integers")
+    result["arguments"] = arguments
+    return result
+
+
+def _parse_search(value, line_number):
+    defaults = {"beam_width": 32, "max_depth": 8, "max_nodes": 5000, "per_effect": 16}
+    if value is None:
+        return defaults
+    if not isinstance(value, dict) or set(value) - set(defaults):
+        raise ValueError(f"batch line {line_number} search accepts beam_width, max_depth, max_nodes, and per_effect")
+    for key, item in value.items():
+        if not isinstance(item, int) or isinstance(item, bool) or item < 1:
+            raise ValueError(f"batch line {line_number} search value '{key}' must be a positive integer")
+        defaults[key] = item
+    return defaults
+
+
+def _parse_bad_bytes(value, line_number):
+    if isinstance(value, str):
+        value = re.findall(r"(?:\\x)?([0-9a-fA-F]{2})", value)
+    if not isinstance(value, list) or not all(isinstance(byte, str) and re.fullmatch(r"[0-9a-fA-F]{2}", byte) for byte in value):
+        raise ValueError(f"batch line {line_number} bad_bytes must be byte hex strings")
+    return sorted(set(byte.lower() for byte in value))
+
+
+def _parse_scratch(value, line_number):
+    if isinstance(value, (str, int)) and not isinstance(value, bool):
+        value = [value]
+    if not isinstance(value, list) or not all(isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip() for item in value):
+        raise ValueError(f"batch line {line_number} scratch must contain strings or integers")
+    return value
+
+
+def _parse_locked(value, line_number):
+    if not isinstance(value, list) or not all(isinstance(item, str) and re.fullmatch(r"[0-9a-fA-F]{16}", item) for item in value):
+        raise ValueError(f"batch line {line_number} locked must be a list of gadget IDs")
+    return [item.lower() for item in value]
+
+
+def gadget_to_record(gadget, formatter, with_base_address: bool, fields=None, cost=None) -> dict:
     record = {
-        "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16],
+        "id": gadget.identifier,
         "source_id": gadget.source_id,
+        "source_sha256": gadget.source_sha256,
+        "extractor": gadget.extractor,
+        "extractor_version": gadget.extractor_version,
         "module": gadget.module,
         "address": gadget.address,
         "address_kind": gadget.address_kind,
@@ -377,9 +608,14 @@ def gadget_to_record(gadget, formatter, with_base_address: bool, fields=None) ->
         "semantics": gadget.semantics,
         "raw": gadget.raw,
         "formatted": formatter.format(gadget, with_base_address),
+        "cost": cost,
     }
     if gadget.bytes_hex is None:
         record.pop("bytes")
+    if gadget.extractor_version is None:
+        record.pop("extractor_version")
+    if cost is None:
+        record.pop("cost")
     if fields:
         return {field: record.get(field) for field in fields}
     return record
@@ -441,6 +677,7 @@ def _apply_constraints(candidates: list, constraints: dict) -> tuple[list, dict,
             rejected_by[id(gadget)] = failures
         else:
             accepted.append(gadget)
+    accepted.sort(key=lambda gadget: synthesis.context_cost(gadget, constraints)["score"])
     return accepted, dict(sorted(rejection_counts.items())), rejected_by
 
 
@@ -483,7 +720,7 @@ def _constraint_failures(gadget, constraints: dict) -> list[str]:
     forbidden = set(constraints.get("forbid", []))
     forbidden_checks = {
         "call": any(item.startswith("call ") for item in semantic["control_flow"]),
-        "flags": semantic["flags_written"],
+        "flags": semantic["flags_written"] or semantic["flags_read"],
         "jump": any(item.startswith("j") or item.startswith("loop") for item in semantic["control_flow"]),
         "memory_read": bool(semantic["memory_reads"]),
         "memory_write": bool(semantic["memory_writes"]),
@@ -509,6 +746,14 @@ def execute_queries(
 ) -> list[dict]:
     records = []
     for query in queries:
+        if isinstance(query, GadgetLookup):
+            records.append(_execute_lookup(console, query, formatter, with_base_address, fields))
+            continue
+        if isinstance(query, Synthesis):
+            records.append(_execute_synthesis(
+                console, query, formatter, with_base_address, fields,
+            ))
+            continue
         if isinstance(query, Plan):
             records.append(_execute_plan(
                 console, query, formatter, with_base_address,
@@ -520,6 +765,137 @@ def execute_queries(
             query, candidates, error, formatter, with_base_address, limit, fields,
         ))
     return records
+
+
+def _execute_lookup(console, lookup, formatter, with_base_address, fields):
+    matches = [gadget for gadget in console.gadgets if gadget.identifier == lookup.gadget_id]
+    return {
+        "schema": "ropcatalog.lookup.v1",
+        "id": lookup.identifier,
+        "gadget_id": lookup.gadget_id,
+        "status": "ok" if matches else "no_match",
+        "count": len(matches),
+        "gadgets": [gadget_to_record(gadget, formatter, with_base_address, fields) for gadget in matches],
+        **({"failure": "gadget_id_not_found"} if not matches else {}),
+    }
+
+
+def _execute_synthesis(console, request, formatter, with_base_address, fields):
+    specification = request.specification
+    solver = synthesis.Synthesizer(
+        console.gadgets,
+        _constraint_failures,
+        specification["constraints"],
+        specification["search"],
+        console.semantic_index,
+    )
+    state, alternatives, expanded, source_rejections = solver.solve(specification)
+    if state is None:
+        record = {
+            "schema": "ropcatalog.synthesis.v1",
+            "id": request.identifier,
+            "status": "no_match",
+            "failure": solver.failure or ("search_exhausted" if expanded >= specification["search"]["max_nodes"] else "no_chain"),
+            "search": {**specification["search"], "expanded": expanded},
+            "constraints": specification["constraints"],
+            "goals": {
+                "set": specification["set"], "write": specification["write"],
+                "transition": specification["transition"], "call": specification["call"],
+            },
+        }
+        if source_rejections:
+            record["rejections"] = source_rejections
+        if alternatives:
+            record["alternatives"] = alternatives[-3:]
+        return record
+
+    chain = synthesis.build_chain(state, specification)
+    gadget_records = [
+        gadget_to_record(
+            gadget, formatter, with_base_address, fields,
+            synthesis.context_cost(gadget),
+        )
+        for gadget in state.gadgets
+    ]
+    byte_verification = verification.verify_bytes(state.gadgets) if specification["verify"] == "bytes" else {
+        "method": "capstone", "status": "not_requested", "executes_target_bytes": False,
+    }
+    emulation = verification.emulate_chain(
+        state.gadgets, chain, solver.desired, specification["scratch"],
+    ) if specification["verify"] == "emulate" else {
+        "method": "unicorn", "status": "not_requested", "executes_target_bytes": False,
+    }
+    verification_issues = list(chain["issues"])
+    if byte_verification["status"] in {"incomplete", "unavailable"}:
+        verification_issues.append(f"byte verification {byte_verification['status']}")
+    if emulation["status"] in {"failed", "mismatch", "unavailable"}:
+        verification_issues.append(f"emulation {emulation['status']}")
+    record = {
+        "schema": "ropcatalog.synthesis.v1",
+        "id": request.identifier,
+        "status": "ok" if not verification_issues else "partial",
+        "count": len(state.gadgets),
+        "goals": {
+            "set": specification["set"], "write": specification["write"],
+            "transition": specification["transition"], "call": specification["call"],
+        },
+        "constraints": specification["constraints"],
+        "search": {**specification["search"], "expanded": expanded},
+        "gadgets": gadget_records,
+        "steps": [
+            {
+                "gadget_id": gadget.identifier,
+                "stack_values": dict(state.stack_inputs[index]),
+                "assignments": gadget.semantics["assignments"],
+                "before": state.trace[index]["before"],
+                "after": state.trace[index]["after"],
+                "memory_writes": state.trace[index]["memory_writes"],
+                "cost": synthesis.context_cost(gadget),
+            }
+            for index, gadget in enumerate(state.gadgets)
+        ],
+        "state": {
+            "arch": state.arch,
+            "registers": dict(state.values),
+            "memory_goals": list(state.memory_goals),
+            "control_done": state.control_done,
+        },
+        "chain": chain,
+        "verification": {
+            "method": "symbolic-effects-v2",
+            "status": "consistent" if not verification_issues else "incomplete",
+            "executes_target_bytes": emulation["executes_target_bytes"],
+            "issues": verification_issues,
+            "bytes": byte_verification,
+            "emulation": emulation,
+            "proof": {
+                "stage": "before_control_transfer" if specification["call"] or specification["transition"] else "chain_end",
+                "registers": [
+                    {
+                        "register": register,
+                        "expected": expected,
+                        "actual": dict(state.values).get(register),
+                        "satisfied": dict(state.values).get(register) == expected,
+                    }
+                    for register, expected in solver.desired.items()
+                ],
+                "memory_goals": {
+                    "satisfied": list(state.memory_goals),
+                    "total": len(specification["write"]),
+                },
+                "control": {
+                    "satisfied": state.control_done,
+                    "required": specification["transition"] is not None,
+                },
+            },
+        },
+    }
+    if specification["emit"]:
+        rendered = synthesis.render_chain(chain)
+        record["rendered"] = {name: rendered[name] for name in specification["emit"]}
+    if alternatives:
+        record["alternatives"] = alternatives
+    return record
 
 
 def _search_candidates(console, query, diagnostics_stream) -> tuple[list, str | None]:
@@ -544,6 +920,7 @@ def _search_candidates(console, query, diagnostics_stream) -> tuple[list, str | 
 
 def _query_record(query, candidates, error, formatter, with_base_address, limit, fields) -> dict:
     results, rejections, rejected_by = _apply_constraints(candidates, query.constraints)
+    pareto = _pareto_gadget_ids(results, query.constraints)
     total = len(results)
     if limit is not None:
         results = results[:limit]
@@ -553,7 +930,10 @@ def _query_record(query, candidates, error, formatter, with_base_address, limit,
     alternatives = []
     if failure == "constraints_rejected_all":
         for gadget in candidates[:3]:
-            alternative = gadget_to_record(gadget, formatter, with_base_address, fields)
+            alternative = gadget_to_record(
+                gadget, formatter, with_base_address, fields,
+                synthesis.context_cost(gadget, query.constraints),
+            )
             alternative["rejected_by"] = rejected_by.get(id(gadget), [])
             alternatives.append(alternative)
     record = {
@@ -565,7 +945,10 @@ def _query_record(query, candidates, error, formatter, with_base_address, limit,
         "total": total,
         "truncated": len(results) < total,
         "gadgets": [
-            gadget_to_record(gadget, formatter, with_base_address, fields)
+            gadget_to_record(
+                gadget, formatter, with_base_address, fields,
+                synthesis.context_cost(gadget, query.constraints),
+            )
             for gadget in results
         ],
     }
@@ -579,67 +962,33 @@ def _query_record(query, candidates, error, formatter, with_base_address, limit,
         record["rejections"] = rejections
     if alternatives:
         record["alternatives"] = alternatives
+    record["ranking"] = "contextual-cost-v1"
+    if pareto:
+        record["pareto"] = pareto
     return record
 
 
-def _execute_plan(console, plan, formatter, with_base_address, diagnostics_stream, fields) -> dict:
-    selected = []
-    selected_gadgets = []
-    live_registers = set()
-    selected_arch = None
-    failed_step = None
-    for step_number, step in enumerate(plan.steps, 1):
-        constraints = dict(step.constraints)
-        step_registers = {
-            registers.canonical_register(name, "x64") for name in step.values
-        } | {
-            registers.canonical_register(name, "x86") for name in step.values
-        }
-        auto_preserve = sorted(live_registers - step_registers)
-        constraints["preserve"] = sorted(set(constraints.get("preserve", [])) | set(auto_preserve))
-        constraints["require_writes"] = sorted(set(constraints.get("require_writes", [])) | set(step.values))
-        constraints["forbid"] = sorted(set(constraints.get("forbid", [])) | {"unknown"})
-        if "terminator" not in constraints:
-            constraints["terminator"] = ["ret", "retn"] if step_number < len(plan.steps) else [
-                "iret", "iretq", "ret", "retn", "syscall", "sysenter",
-            ]
-        if selected_arch:
-            constraints["arch"] = [selected_arch]
-        query = Query(str(step_number), step.command, step.raw_gadget, constraints)
-        candidates, error = _search_candidates(console, query, diagnostics_stream)
-        result = _query_record(query, candidates, error, formatter, with_base_address, 1, fields)
-        if result["status"] != "ok":
-            failed_step = result
+def _pareto_gadget_ids(candidates, constraints, maximum=8):
+    front = []
+    for gadget in candidates:
+        cost = synthesis.context_cost(gadget, constraints)["components"]
+        if any(_dominates(other_cost, cost) for _other, other_cost in front):
+            continue
+        front = [(other, other_cost) for other, other_cost in front if not _dominates(cost, other_cost)]
+        front.append((gadget, cost))
+        if len(front) >= maximum:
             break
-        gadget = next(candidate for candidate in candidates if not _constraint_failures(candidate, constraints))
-        selected_arch = gadget.arch
-        canonical_values = {
-            registers.canonical_register(name, gadget.arch): value
-            for name, value in step.values.items()
-        }
-        live_registers = {
-            registers.canonical_register(name, gadget.arch)
-            for name in live_registers
-        }
-        live_registers.difference_update(gadget.semantics["clobbers"])
-        live_registers.update(canonical_values)
-        selected_gadgets.append(gadget)
-        selected.append({
-            "step": step_number,
-            "command": step.command,
-            "constraints": constraints,
-            "values": canonical_values,
-            "auto_preserve": auto_preserve,
-            "gadget_index": len(selected_gadgets) - 1,
-            "stack": {
-                "delta": gadget.semantics["stack_delta"],
-                "extra_bytes": _extra_stack_bytes(gadget),
-                "pops": [
-                    {"register": name, "value": canonical_values.get(name, "<filler>")}
-                    for name in gadget.semantics["stack_pops"]
-                ],
-            },
-        })
+    return [gadget.identifier for gadget, _cost in front]
+
+
+def _dominates(left, right):
+    return all(left[name] <= right[name] for name in left) and any(left[name] < right[name] for name in left)
+
+
+def _execute_plan(console, plan, formatter, with_base_address, diagnostics_stream, fields) -> dict:
+    selected, selected_gadgets, failed_step = _search_plan(
+        console, plan, formatter, with_base_address, diagnostics_stream, fields,
+    )
 
     verification_issues = []
     for selection, gadget in zip(selected, selected_gadgets):
@@ -658,6 +1007,18 @@ def _execute_plan(console, plan, formatter, with_base_address, diagnostics_strea
         if actual != plan.alignment["final"]:
             verification_issues.append(f"final stack alignment is {actual}, expected {plan.alignment['final']}")
 
+    plan_state = synthesis.SearchState(
+        tuple(selected_gadgets),
+        tuple(tuple(sorted(selection["values"].items())) for selection in selected),
+        tuple(sorted({name: value for selection in selected for name, value in selection["values"].items()}.items())),
+        (), False, selected_gadgets[0].arch if selected_gadgets else None, 0,
+    )
+    chain = synthesis.build_chain(plan_state, {
+        "abi": "none", "bad_bytes": [], "bases": {}, "call": None,
+        "filler": "<filler>", "max_words": 256, "mitigations": [], "write": [],
+    })
+    verification_issues.extend(chain["issues"])
+
     status = "ok" if failed_step is None else ("partial" if selected else "no_match")
     return {
         "schema": "ropcatalog.plan.v1",
@@ -675,6 +1036,7 @@ def _execute_plan(console, plan, formatter, with_base_address, diagnostics_strea
             "alignment": plan.alignment,
             "total_delta": total_stack_delta,
         },
+        "chain": chain,
         "verification": {
             "method": "syntactic-effects-v1",
             "status": "consistent" if failed_step is None and not verification_issues else "incomplete",
@@ -699,12 +1061,24 @@ def interface_contract() -> dict:
         "inputs": ["rp++", "ROPgadget", "Ropper", "ropcatalog.catalog.v1"],
         "queries": {
             "exact": {"argument": "--query", "repeatable": True},
-            "semantic": {"argument": "--command"},
+            "semantic": {
+                "argument": "--command",
+                "commands": sorted(terminal.Terminal.SUPPORTED_QUERY_COMMANDS),
+                "modifiers": ["/n", "/v"],
+            },
             "batch": {
                 "argument": "--batch",
-                "record_keys": ["id", "query|command|plan", "constraints"],
+                "record_keys": ["id", "query|command|plan|synthesize|gadget_id"],
             },
             "serve": {"argument": "--serve", "transport": "JSONL standard input/output"},
+        },
+        "synthesis": {
+            "goals": ["set", "write", "transition", "call", "postconditions"],
+            "profiles": sorted(synthesis.ABI_ARGUMENTS),
+            "mitigations": ["cet", "cfg", "kpti", "smap", "smep"],
+            "search": ["beam_width", "max_depth", "max_nodes", "per_effect"],
+            "outputs": ["chain words", "stack frames", "python", "pwntools"],
+            "stable_references": ["gadget_id", "locked"],
         },
         "constraints": [
             "arch", "forbid", "max_stack_delta", "modules", "preserve",
@@ -717,13 +1091,18 @@ def interface_contract() -> dict:
             "syscall", "unknown",
         ],
         "gadget_fields": [
-            "id", "source_id", "module", "address", "address_kind", "arch", "bytes", "raw",
-            "instructions", "semantics", "formatted",
+            "id", "source_id", "source_sha256", "extractor", "extractor_version", "module",
+            "address", "address_kind", "arch", "bytes", "raw", "instructions", "semantics",
+            "formatted", "cost",
         ],
         "outputs": [
-            "ropcatalog.query.v1", "ropcatalog.plan.v1", "ropcatalog.catalog.v1",
+            "ropcatalog.query.v1", "ropcatalog.lookup.v1", "ropcatalog.plan.v1",
+            "ropcatalog.synthesis.v1", "ropcatalog.catalog.v1",
         ],
-        "verification": {"level": "syntactic", "executes_target_bytes": False},
+        "verification": {
+            "levels": ["syntactic", "capstone", "unicorn"],
+            "can_execute_target_bytes": True,
+        },
     }
 
 
@@ -931,3 +1310,93 @@ def main() -> int:
         return 0
 
     return console.start()
+
+def _search_plan(console, plan, formatter, with_base_address, diagnostics_stream, fields):
+    prepared = []
+    for step_number, step in enumerate(plan.steps, 1):
+        constraints = dict(step.constraints)
+        constraints["require_writes"] = sorted(set(constraints.get("require_writes", [])) | set(step.values))
+        constraints["forbid"] = sorted(set(constraints.get("forbid", [])) | {"unknown"})
+        if "terminator" not in constraints:
+            constraints["terminator"] = ["ret", "retn"] if step_number < len(plan.steps) else [
+                "iret", "iretq", "ret", "retn", "syscall", "sysenter",
+            ]
+        query = Query(str(step_number), step.command, step.raw_gadget, constraints)
+        candidates, error = _search_candidates(console, query, diagnostics_stream)
+        if error:
+            return [], [], _query_record(query, candidates, error, formatter, with_base_address, 1, fields)
+        prepared.append((step_number, step, constraints, candidates))
+
+    nodes = 0
+    best = ([], [], None, set())
+
+    def visit(index, selected, selected_gadgets, selected_arch, live_values):
+        nonlocal nodes, best
+        if len(selected) > len(best[0]):
+            best = (selected, selected_gadgets, selected_arch, live_values)
+        if index == len(prepared):
+            return selected, selected_gadgets
+        if nodes >= 5000:
+            return None
+        step_number, step, base_constraints, candidates = prepared[index]
+        step_registers = {
+            registers.canonical_register(name, selected_arch or "x64") for name in step.values
+        }
+        constraints = dict(base_constraints)
+        constraints["preserve"] = sorted(set(constraints.get("preserve", [])) | (live_values - step_registers))
+        if selected_arch:
+            constraints["arch"] = [selected_arch]
+        candidates = sorted(candidates, key=lambda gadget: synthesis.context_sort_key(gadget, constraints))
+        for gadget in candidates[:64]:
+            nodes += 1
+            if _constraint_failures(gadget, constraints):
+                continue
+            canonical_values = {
+                registers.canonical_register(name, gadget.arch): value
+                for name, value in step.values.items()
+            }
+            canonical_live = {registers.canonical_register(name, gadget.arch) for name in live_values}
+            next_live = canonical_live - set(gadget.semantics["clobbers"])
+            next_live.update(canonical_values)
+            selection = {
+                "step": step_number,
+                "command": step.command,
+                "constraints": constraints,
+                "values": canonical_values,
+                "auto_preserve": sorted(canonical_live - set(canonical_values)),
+                "gadget_index": len(selected_gadgets),
+                "stack": {
+                    "delta": gadget.semantics["stack_delta"],
+                    "extra_bytes": _extra_stack_bytes(gadget),
+                    "pops": [
+                        {"register": name, "value": canonical_values.get(name, "<filler>")}
+                        for name in gadget.semantics["stack_pops"]
+                    ],
+                },
+            }
+            result = visit(
+                index + 1,
+                selected + [selection],
+                selected_gadgets + [gadget],
+                gadget.arch,
+                next_live,
+            )
+            if result is not None:
+                return result
+        return None
+
+    result = visit(0, [], [], None, set())
+    if result is not None:
+        return result[0], result[1], None
+    selected, selected_gadgets, selected_arch, live_values = best
+    if len(selected) == len(prepared):
+        return selected, selected_gadgets, None
+    step_number, step, constraints, candidates = prepared[len(selected)]
+    constraints = dict(constraints)
+    constraints["preserve"] = sorted(set(constraints.get("preserve", [])) | live_values)
+    if selected_arch:
+        constraints["arch"] = [selected_arch]
+    query = Query(str(step_number), step.command, step.raw_gadget, constraints)
+    return selected, selected_gadgets, _query_record(
+        query, candidates, None, formatter, with_base_address, 1, fields,
+    )

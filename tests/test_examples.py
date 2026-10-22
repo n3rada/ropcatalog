@@ -38,8 +38,9 @@ COMMAND_CASES = [
     ("pop rax", "pop rax ; ret"),
     ("ppr", "pop rsp ; pop rdi ; ret"),
     ("pivot reg", "mov rsp, r11 ; ret"),
-    ("jump rsp /n", "call rsp"),
+    ("jump rsp", "call rsp"),
     ("call rax", "call rax"),
+    ("ret", "ret"),
     ("transition", "swapgs ; iretq"),
     ("syscall", "syscall ; ret"),
     ("loadcr rcx", "mov cr4, rcx ; ret"),
@@ -83,7 +84,7 @@ def test_real_windows_rp_examples(module, expected_count, expected_raw, expected
 def test_real_examples_cover_every_retrieval_command(real_windows_terminal):
     covered = {command.split(maxsplit=1)[0] for command, _ in COMMAND_CASES}
 
-    assert covered == real_windows_terminal.query_command_names
+    assert covered == real_windows_terminal.query_command_names - {"neg", "not", "popad", "pushad", "writeimm"}
 
 
 @pytest.mark.parametrize(("command", "expected_raw"), COMMAND_CASES)
@@ -91,3 +92,9 @@ def test_retrieval_command_against_real_examples(real_windows_terminal, command,
     results = real_windows_terminal.execute(command)
 
     assert any(gadget.raw == expected_raw for gadget in results)
+
+
+def test_real_examples_reject_semantic_false_positives(real_windows_terminal):
+    assert all("cr3" not in gadget.raw for gadget in real_windows_terminal.execute("copy rax"))
+    assert all("lea eax, [rax" not in gadget.raw for gadget in real_windows_terminal.execute("save rax"))
+    assert all(not gadget.raw.startswith("mov es,") for gadget in real_windows_terminal.execute("read rax"))

@@ -43,6 +43,7 @@ class TestRegisterSets:
             assert f"r{i}d" in X64_REGISTERS
             assert f"r{i}w" in X64_REGISTERS
             assert f"r{i}b" in X64_REGISTERS
+            assert f"r{i}l" in X64_REGISTERS
 
     def test_x64_has_64bit_gp(self):
         for reg in ("rax", "rbx", "rcx", "rdx", "rsp", "rbp", "rsi", "rdi"):
@@ -81,7 +82,7 @@ class TestSubRegisters:
         assert SUB_REGISTERS_X64["rax"] == ["rax", "eax", "ax", "al", "ah"]
 
     def test_x64_extended_reg_mapping(self):
-        assert SUB_REGISTERS_X64["r8"] == ["r8", "r8d", "r8w", "r8b"]
+        assert SUB_REGISTERS_X64["r8"] == ["r8", "r8d", "r8w", "r8b", "r8l"]
 
     def test_all_x86_gp_covered(self):
         for reg in ("eax", "ebx", "ecx", "edx", "esp", "ebp", "esi", "edi"):
@@ -137,5 +138,5 @@ class TestHelperFunctions:
 
 class TestSingleOperandModifiers:
     def test_expected_modifiers(self):
-        expected = {"inc", "dec", "neg", "not", "push", "pop", "bswap"}
+        expected = {"inc", "dec", "neg", "not", "pop", "bswap"}
         assert expected == SINGLE_OPERAND_MODIFIERS

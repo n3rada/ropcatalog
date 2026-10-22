@@ -43,9 +43,10 @@ X64_ADDITIONAL_REGISTERS: Set[str] = {
     
     # Extended registers (8-bit)
     "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
+    "r8l", "r9l", "r10l", "r11l", "r12l", "r13l", "r14l", "r15l",
     
     # Special 8-bit variants
-    "sil", "dil"
+    "sil", "dil", "bpl", "spl"
 }
 
 # Complete x64 register set
@@ -77,7 +78,7 @@ VOLATILE_X64: Set[str] = VOLATILE_X86 | {
     "ax", "cx", "dx", "r8w", "r9w", "r10w", "r11w",
     
     # 8-bit
-    "al", "cl", "dl", "r8b", "r9b", "r10b", "r11b"
+    "al", "cl", "dl", "r8b", "r9b", "r10b", "r11b", "r8l", "r9l", "r10l", "r11l"
 }
 
 # ============================================================================
@@ -103,7 +104,8 @@ NONVOLATILE_X64: Set[str] = NONVOLATILE_X86 | {
     "bx", "bp", "si", "di", "sp", "r12w", "r13w", "r14w", "r15w",
     
     # 8-bit
-    "bl", "bh", "bpl", "sil", "dil", "spl", "r12b", "r13b", "r14b", "r15b"
+    "bl", "bh", "bpl", "sil", "dil", "spl", "r12b", "r13b", "r14b", "r15b",
+    "r12l", "r13l", "r14l", "r15l"
 }
 
 # ============================================================================
@@ -130,14 +132,14 @@ SUB_REGISTERS_X64: Dict[str, List[str]] = {
     "rbp": ["rbp", "ebp", "bp"],
     "rsi": ["rsi", "esi", "si", "sil"],
     "rdi": ["rdi", "edi", "di", "dil"],
-    "r8": ["r8", "r8d", "r8w", "r8b"],
-    "r9": ["r9", "r9d", "r9w", "r9b"],
-    "r10": ["r10", "r10d", "r10w", "r10b"],
-    "r11": ["r11", "r11d", "r11w", "r11b"],
-    "r12": ["r12", "r12d", "r12w", "r12b"],
-    "r13": ["r13", "r13d", "r13w", "r13b"],
-    "r14": ["r14", "r14d", "r14w", "r14b"],
-    "r15": ["r15", "r15d", "r15w", "r15b"],
+    "r8": ["r8", "r8d", "r8w", "r8b", "r8l"],
+    "r9": ["r9", "r9d", "r9w", "r9b", "r9l"],
+    "r10": ["r10", "r10d", "r10w", "r10b", "r10l"],
+    "r11": ["r11", "r11d", "r11w", "r11b", "r11l"],
+    "r12": ["r12", "r12d", "r12w", "r12b", "r12l"],
+    "r13": ["r13", "r13d", "r13w", "r13b", "r13l"],
+    "r14": ["r14", "r14d", "r14w", "r14b", "r14l"],
+    "r15": ["r15", "r15d", "r15w", "r15b", "r15l"],
 }
 
 # ============================================================================
@@ -145,9 +147,7 @@ SUB_REGISTERS_X64: Dict[str, List[str]] = {
 # ============================================================================
 
 # Single-operand instructions that modify their operand
-SINGLE_OPERAND_MODIFIERS: Set[str] = {
-    "inc", "dec", "neg", "not", "push", "pop", "bswap"
-}
+SINGLE_OPERAND_MODIFIERS: Set[str] = {"inc", "dec", "neg", "not", "pop", "bswap"}
 
 # ============================================================================
 # HELPER FUNCTIONS

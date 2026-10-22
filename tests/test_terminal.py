@@ -58,6 +58,10 @@ class TestDispatch:
         with pytest.raises(SystemExit):
             term.execute("exit")
 
+    def test_modifiers_are_order_independent(self):
+        term = _make_terminal([("0x1000", "mov eax, ecx ; ret")])
+        assert term.execute("copy ecx /v /n") == term.execute("copy ecx /n /v")
+
 
 class TestSearchCommands:
     @pytest.fixture
@@ -131,6 +135,35 @@ class TestRegisterCommands:
         results = term.execute("dec eax")
         assert any("dec eax" in g.raw for g in results)
 
+    def test_rejects_non_general_destination_and_alias_self_copy(self):
+        term = _make_terminal(
+            [("0x1000", "mov cr3, rax ; ret"), ("0x1004", "lea eax, [rax+1] ; ret")],
+            arch="x64",
+        )
+        assert term.execute("copy rax") == []
+        assert term.execute("save rax") == []
+
+    def test_rejects_segment_destination_for_read(self):
+        term = _make_terminal([("0x1000", "mov es, word [rax] ; ret")], arch="x64")
+        assert term.execute("read rax") == []
+
+    def test_unary_bad_character_transforms(self):
+        term = _make_terminal([("0x1000", "neg eax ; dec eax ; ret"), ("0x1004", "not eax ; ret")])
+        assert term.execute("neg eax")[0].raw.startswith("neg eax")
+        assert term.execute("not eax")[0].raw == "not eax ; ret"
+
+    def test_copy_requires_original_source_value(self):
+        term = _make_terminal([("0x1000", "add eax, 1 ; mov ebx, eax ; ret")])
+        assert term.execute("copy eax") == []
+
+    def test_copy_rejects_lea_displacement(self):
+        term = _make_terminal([("0x1000", "lea ebx, [eax+0x10] ; ret")])
+        assert term.execute("copy eax") == []
+
+    def test_copyto_supports_push_pop_transfer(self):
+        term = _make_terminal([("0x1000", "push eax ; pop ebx ; ret")])
+        assert term.execute("copyto ebx")[0].raw == "push eax ; pop ebx ; ret"
+
 
 class TestMemoryCommands:
     @pytest.fixture
@@ -154,6 +187,26 @@ class TestMemoryCommands:
     def test_memoff(self, term):
         results = term.execute("memoff ebx+0x20")
         assert any("ebx+0x20" in g.raw for g in results)
+
+    def test_read_supports_offset_and_rejects_changed_pointer(self):
+        term = _make_terminal(
+            [("0x1000", "mov eax, [ebx+0x20] ; ret"), ("0x1004", "inc ebx ; mov eax, [ebx] ; ret")]
+        )
+        assert [g.address for g in term.execute("read ebx")] == ["0x1000"]
+
+    def test_write_requires_original_pointer_and_source(self):
+        term = _make_terminal(
+            [("0x1000", "inc eax ; mov [eax], ecx ; ret"), ("0x1004", "inc ecx ; mov [eax], ecx ; ret")]
+        )
+        assert [g.address for g in term.execute("writeptr eax")] == ["0x1004"]
+        assert term.execute("writereg ecx") == []
+
+    def test_write_immediate(self):
+        term = _make_terminal(
+            [("0x1000", "mov dword [eax], 0 ; ret"), ("0x1004", "mov byte [eax+0x10], 0x41 ; ret")]
+        )
+        assert len(term.execute("writeimm eax")) == 2
+        assert term.execute("writeimm eax 0x41")[0].address == "0x1004"
 
 
 class TestStackCommands:
@@ -180,6 +233,33 @@ class TestStackCommands:
     def test_ppr(self, term):
         results = term.execute("ppr")
         assert any("pop eax ; pop ebx ; ret" in g.raw for g in results)
+
+    def test_pushad_popad_and_ret(self):
+        term = _make_terminal(
+            [("0x1000", "pushad ; ret"), ("0x1004", "popad ; ret"), ("0x1008", "retn 0x10")]
+        )
+        assert term.execute("pushad")[0].address == "0x1000"
+        assert term.execute("popad")[0].address == "0x1004"
+        assert term.execute("ret")[0].address == "0x1008"
+
+    def test_pivot_rejects_stack_self_copy(self):
+        term = _make_terminal([("0x1000", "mov esp, esp ; ret")])
+        assert term.execute("pivot reg") == []
+
+
+class TestControlCommands:
+    def test_transfer_requires_original_target(self):
+        term = _make_terminal(
+            [("0x1000", "inc eax ; call eax"), ("0x1004", "inc eax ; jmp eax"), ("0x1008", "call [eax+0x10]")]
+        )
+        assert [g.address for g in term.execute("call eax")] == ["0x1008"]
+        assert [g.address for g in term.execute("jump eax")] == ["0x1008"]
+
+    def test_functional_nop_rejects_memory_and_stack_pointer_effects(self):
+        term = _make_terminal(
+            [("0x1000", "add [eax], 0 ; ret"), ("0x1004", "mov esp, esp ; ret"), ("0x1008", "mov eax, eax ; ret")]
+        )
+        assert [g.address for g in term.execute("funcnop")] == ["0x1008"]
 
 
 class TestHelpAndToggles:
