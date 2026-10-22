@@ -4,6 +4,8 @@
 import os
 import re
 import sys
+from collections.abc import Callable
+from typing import Any
 
 # Third party library imports
 from prompt_toolkit import PromptSession
@@ -19,9 +21,16 @@ from . import registers
 from . import synthesis
 
 
-def requires_arg(func):
-    """Decorator that marks a command as requiring at least one argument."""
-    func._requires_arg = True
+def requires_arg(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that marks a command as requiring at least one argument.
+
+    Args:
+        func: Command callable to mark.
+
+    Returns:
+        The same callable with its argument requirement marker set.
+    """
+    setattr(func, "_requires_arg", True)
     return func
 
 
@@ -45,9 +54,16 @@ class Terminal:
 
     def __init__(self,
         full_catalog: "gadgets.Gadgets",
-        formatter: "formatters.GadgetFormatter" = None,
-        with_base_address: bool=False
-    ):
+        formatter: "formatters.GadgetFormatter | None" = None,
+        with_base_address: bool = False,
+    ) -> None:
+        """Bind a gadget catalog to interactive and non-interactive commands.
+
+        Args:
+            full_catalog: Loaded gadget catalog shared by terminal commands.
+            formatter: Formatter used to render gadgets in output records.
+            with_base_address: Whether formatted addresses use module base expressions.
+        """
         self._gadgets = full_catalog
         self._formatter = formatter
         self._with_base_address = with_base_address
@@ -106,23 +122,55 @@ class Terminal:
 
     @property
     def command_names(self) -> set[str]:
+        """Return every supported interactive command name.
+
+        Returns:
+            All registered terminal command names.
+        """
         return set(self._commands)
 
     @property
     def query_command_names(self) -> set[str]:
+        """Return commands that retrieve gadgets without mutating REPL state.
+
+        Returns:
+            Registered commands that retrieve gadgets without changing REPL state.
+        """
         return set(self._commands) - {"clear", "exit", "help", "offset", "style", "uniq"}
 
     @property
-    def gadgets(self) -> list:
+    def gadgets(self) -> list[gadgets.Gadget]:
+        """Return the currently active gadget list.
+
+        Returns:
+            Active gadget view.
+        """
         return list(self._gadgets)
 
     @property
-    def semantic_index(self):
+    def semantic_index(self) -> synthesis.SemanticIndex:
+        """Return the lazily constructed semantic synthesis index.
+
+        Returns:
+            Lazily constructed semantic index for the active catalog.
+        """
         if self._semantic_index is None:
             self._semantic_index = synthesis.SemanticIndex(self.gadgets)
         return self._semantic_index
 
-    def execute(self, command_input: str) -> list:
+    def execute(self, command_input: str) -> list[gadgets.Gadget]:
+        """Dispatch one normalized command and return gadget results.
+
+        Args:
+            command_input: Command string executed without interactive prompting.
+
+        Returns:
+            Gadgets selected by the command.
+
+        Raises:
+            SystemExit: If the command requests termination.
+            re.error: If a command contains an invalid regular expression.
+        """
         command_parts = command_input.split(maxsplit=1)
         cmd = command_parts[0].lower()
         args = command_parts[1].strip().lower() if len(command_parts) > 1 else None
@@ -175,6 +223,11 @@ class Terminal:
         return results if isinstance(results, list) else []
 
     def start(self) -> int:
+        """Run the interactive REPL until exit or repeated interruption.
+
+        Returns:
+            REPL exit status.
+        """
         session = PromptSession(
             cursor=CursorShape.BLINKING_BEAM,
             multiline=False,
@@ -221,7 +274,14 @@ class Terminal:
                 print("[!] Wrongly typed command")
 
     def run_command(self, command: str) -> int:
-        """Execute a single command and print results to stdout, then exit."""
+        """Execute a single command and print results to stdout, then exit.
+
+        Args:
+            command: Command string read by the REPL.
+
+        Returns:
+            Zero on success, or one when regex validation fails.
+        """
         try:
             # Redirect stdout to stderr during execution so info messages
             # (e.g., "[*] Finding...") don't pollute piped output
@@ -249,8 +309,12 @@ class Terminal:
     #  General: Help, exit, clear, list, toggles, style
     # ──────────────────────────────────────────────────────────────────
 
-    def show_help(self, fake_arg=None) -> None:
-        """Show available commands"""
+    def show_help(self, fake_arg: str | None = None) -> None:
+        """Show available commands.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+        """
 
         # Group commands by category
         categories = {
@@ -335,20 +399,42 @@ class Terminal:
         print("  Combined:    copy rax /v /n  (volatile only, including bad ops)")
         print("="*70 + "\n")
 
-    def exit_command(self, fake_arg=None) -> bool:
-        """Exit"""
+    def exit_command(self, fake_arg: str | None = None) -> bool:
+        """Exit.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            False, signaling the REPL to stop.
+        """
         return True
 
-    def clear_command(self, fake_arg=None):
-        """Clear the terminal"""
+    def clear_command(self, fake_arg: str | None = None) -> None:
+        """Clear the terminal.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+        """
         os.system("cls" if os.name == "nt" else "clear")
 
-    def list_gadgets(self, fake_arg=None) -> list:
-        """List all gadgets"""
+    def list_gadgets(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """List all gadgets.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Current active gadget view after printing it.
+        """
         return list(self._gadgets)
 
-    def toggle_offset(self, mode: str = None):
-        """Toggle base address offset display (offset on/off)"""
+    def toggle_offset(self, mode: str | None = None) -> None:
+        """Toggle base address offset display (offset on/off).
+
+        Args:
+            mode: Command selector controlling the named mode.
+        """
         if not mode:
             # When called without arguments, toggle the current state
             self._with_base_address = not self._with_base_address
@@ -365,8 +451,12 @@ class Terminal:
             print("[!] Usage: offset [on|off]")
             print("\tNo argument toggles current state")
 
-    def toggle_uniqueness(self, mode: str = None):
-        """Toggle uniqueness filtering (uniq on/off)"""
+    def toggle_uniqueness(self, mode: str | None = None) -> None:
+        """Toggle uniqueness filtering (uniq on/off).
+
+        Args:
+            mode: Command selector controlling the named mode.
+        """
         if not mode:
             # When called without arguments, toggle the current state
             new_state = not self._gadgets._unique_mode
@@ -382,8 +472,12 @@ class Terminal:
             print("[!] Usage: uniq [on|off]")
             print("\tNo argument toggles current state")
 
-    def change_style(self, style_name: str = None) -> None:
-        """Change output format style (e.g., style python, style cpp)"""
+    def change_style(self, style_name: str | None = None) -> None:
+        """Change output format style (e.g., style python, style cpp).
+
+        Args:
+            style_name: Output style name.
+        """
 
         from . import formatters
 
@@ -416,28 +510,59 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     @requires_arg
-    def exact_search(self, instructions: str) -> list:
-        """Exact search for gadgets (e.g., ? pop eax ; ret)"""
+    def exact_search(self, instructions: str) -> list[gadgets.Gadget]:
+        """Exact search for gadgets (e.g., ? pop eax ; ret).
+
+        Args:
+            instructions: Normalized machine instructions in execution order.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print(f"[*] Exact search of '{instructions}'")
         return [g for g in self._gadgets if g.exact_match(instructions)]
 
     @requires_arg
-    def partial_search(self, instructions: str) -> list:
-        """Partial search for gadgets (e.g., / pop)"""
+    def partial_search(self, instructions: str) -> list[gadgets.Gadget]:
+        """Partial search for gadgets (e.g., / pop).
+
+        Args:
+            instructions: Normalized machine instructions in execution order.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Partial search of '{instructions}'")
         return [g for g in self._gadgets if g.partial_match(instructions)]
 
     @requires_arg
-    def regex_search(self, pattern: str) -> list:
-        """Search for gadgets using a regular expression pattern (e.g., re mov eax, .*)"""
+    def regex_search(self, pattern: str) -> list[gadgets.Gadget]:
+        """Search for gadgets using a regular expression pattern (e.g., re mov eax, .*).
+
+        Args:
+            pattern: Regular expression applied to normalized gadget text.
+
+        Returns:
+            Matching gadgets in active catalog order.
+
+        Raises:
+            re.error: If ``pattern`` is invalid.
+        """
         print(f"[*] Searching with regex '{pattern}'")
 
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
     @requires_arg
-    def memory_offset_search(self, arg: str):
-        """Search for dereferences with register+offset (e.g., memoff rbx+0x20, or just memoff rbx to match any offset)"""
+    def memory_offset_search(self, arg: str) -> list[gadgets.Gadget]:
+        """Search for dereferences with register+offset (e.g., memoff rbx+0x20, or just memoff rbx to match any offset).
+
+        Args:
+            arg: Raw command argument to parse.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not arg:
             print("[!] Usage: memoff <reg> [+/- offset (optional)]")
@@ -467,8 +592,15 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     @requires_arg
-    def copy_register(self, reg: str) -> list:
-        """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modification of copied register allowed."""
+    def copy_register(self, reg: str) -> list[gadgets.Gadget]:
+        """This method finds gadgets that copy the value of a register (e.g., eax) to another register with modification of copied register allowed.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
 
@@ -528,8 +660,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def copy_to_register(self, reg: str) -> list:
-        """Find gadgets that copy into the given register (e.g., r9)"""
+    def copy_to_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that copy into the given register (e.g., r9).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
 
@@ -570,8 +709,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def save_register(self, reg: str) -> list:
-        """This method finds gadgets that copy the value of a register (e.g., eax) to another register without modifying either register afterward."""
+    def save_register(self, reg: str) -> list[gadgets.Gadget]:
+        """This method finds gadgets that copy the value of a register (e.g., eax) to another register without modifying either register afterward.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
 
@@ -622,8 +768,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def save_to_register(self, args: str) -> list:
-        """Find gadgets that save into the given register without modifying afterward (saveto eax [reg|imm])"""
+    def save_to_register(self, args: str) -> list[gadgets.Gadget]:
+        """Find gadgets that save into the given register without modifying afterward (saveto eax [reg|imm]).
+
+        Args:
+            args: Destination register and optional allowed source.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         parts = args.split()
         reg = parts[0].strip()
@@ -686,7 +839,16 @@ class Terminal:
         return results
 
     @staticmethod
-    def _stack_copy_to(gadget, reg: str) -> bool:
+    def _stack_copy_to(gadget: gadgets.Gadget, reg: str) -> bool:
+        """Recognize a push/pop register copy in analyzed stack effects.
+
+        Args:
+            gadget: Gadget to inspect, rank, format, or apply.
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            True when stack effects represent a coherent push/pop copy.
+        """
         target = registers.canonical_register(reg, gadget.arch)
         effect = gadget.semantics["assignments"].get(target, {})
         if effect.get("kind") != "register" or effect.get("value") == target:
@@ -704,8 +866,15 @@ class Terminal:
         return False
 
     @requires_arg
-    def swap_register(self, reg: str) -> list:
-        """Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>)"""
+    def swap_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that swap given register with any other register (e.g., xchg eax, <reg>).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that swap {reg} with any other register")
 
@@ -740,8 +909,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def zero(self, reg: str) -> list:
-        """Find gadgets that zero the given register"""
+    def zero(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that zero the given register.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that zero {reg}")
 
@@ -778,16 +954,39 @@ class Terminal:
         return results
 
     @requires_arg
-    def negate_register(self, reg: str) -> list:
-        """Find gadgets that negate a register."""
+    def negate_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that negate a register.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         return self._find_unary_transform("neg", reg)
 
     @requires_arg
-    def invert_register(self, reg: str) -> list:
-        """Find gadgets that invert a register."""
+    def invert_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that invert a register.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         return self._find_unary_transform("not", reg)
 
-    def _find_unary_transform(self, operation: str, reg: str) -> list:
+    def _find_unary_transform(self, operation: str, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets containing an exact unary register operation.
+
+        Args:
+            operation: Unary operation mnemonic to find.
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print(f"[*] Finding gadgets that {operation} {reg}")
         results = []
         pattern = rf"{operation} {re.escape(reg)}"
@@ -801,8 +1000,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def increment_register(self, reg: str) -> list:
-        """Find gadgets that increment a register (e.g., inc rax OR add rax, <non-zero>)"""
+    def increment_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that increment a register (e.g., inc rax OR add rax, <non-zero>).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that increment {reg}")
 
@@ -856,8 +1062,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def decrement_register(self, reg: str) -> list:
-        """Find gadgets that decrement a register (e.g., dec rax OR sub rax, <non-zero>)"""
+    def decrement_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Find gadgets that decrement a register (e.g., dec rax OR sub rax, <non-zero>).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that decrement {reg}")
 
@@ -911,8 +1124,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def add_to_register(self, args: str = None) -> list:
-        """Add register to another register (e.g., add rax rsi OR add rax for any)"""
+    def add_to_register(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Add register to another register (e.g., add rax rsi OR add rax for any).
+
+        Args:
+            args: Destination register and optional register or immediate source.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not args:
             print("[!] Usage: add <register> [other_register]")
@@ -999,8 +1219,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def sub_from_register(self, args: str = None) -> list:
-        """Subtract register from another register (e.g., sub rax rsi OR sub rax for any)"""
+    def sub_from_register(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Subtract register from another register (e.g., sub rax rsi OR sub rax for any).
+
+        Args:
+            args: Destination register and optional register or immediate source.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not args:
             print("[!] Usage: sub <register> [other_register]")
@@ -1091,8 +1318,15 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     @requires_arg
-    def dereference_register(self, reg: str) -> list:
-        """Read from memory (e.g., read rbx finds mov rax, [rbx])"""
+    def dereference_register(self, reg: str) -> list[gadgets.Gadget]:
+        """Read from memory (e.g., read rbx finds mov rax, [rbx]).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that read from memory pointed by {reg}")
 
@@ -1129,8 +1363,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def write_register_to_memory(self, reg: str = None) -> list:
-        """Write register to memory (e.g., write rcx finds mov [<any>], rcx)"""
+    def write_register_to_memory(self, reg: str | None = None) -> list[gadgets.Gadget]:
+        """Write register to memory (e.g., write rcx finds mov [<any>], rcx).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not reg:
             print("[!] Usage: write <source_register>")
@@ -1171,8 +1412,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def write_to_register(self, reg: str = None) -> list:
-        """Write to memory pointed by register (e.g., writeto rax finds mov [rax], <any>)"""
+    def write_to_register(self, reg: str | None = None) -> list[gadgets.Gadget]:
+        """Write to memory pointed by register (e.g., writeto rax finds mov [rax], <any>).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not reg:
             print("[!] Usage: writeptr <pointer_register>")
@@ -1216,8 +1464,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def write_byte(self, args: str = None) -> list:
-        """Write byte to memory pointer (e.g., writebyte rax finds mov byte [rax], <any>)"""
+    def write_byte(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Write byte to memory pointer (e.g., writebyte rax finds mov byte [rax], <any>).
+
+        Args:
+            args: Pointer register and optional byte source.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not args:
             print("[!] Usage: writebyte <pointer_register>")
@@ -1254,8 +1509,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def write_immediate_to_memory(self, args: str) -> list:
-        """Write an immediate value to memory through a register."""
+    def write_immediate_to_memory(self, args: str) -> list[gadgets.Gadget]:
+        """Write an immediate value to memory through a register.
+
+        Args:
+            args: Pointer register and optional immediate value.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         parts = args.split(maxsplit=1)
         ptr_reg = parts[0]
         expected = parts[1] if len(parts) > 1 else None
@@ -1290,8 +1552,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def add_to_memory(self, args: str = None) -> list:
-        """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any register)"""
+    def add_to_memory(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Add to value in memory (e.g., addmem rax rcx OR addmem rax for any register).
+
+        Args:
+            args: Pointer register and optional source constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not args:
             print("[!] Usage: addmem <pointer_register> [source_register]")
@@ -1372,8 +1641,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def sub_from_memory(self, args: str = None) -> list:
-        """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any register)"""
+    def sub_from_memory(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Subtract from value in memory (e.g., submem rax rcx OR submem rax for any register).
+
+        Args:
+            args: Pointer register and optional source constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not args:
             print("[!] Usage: submem <pointer_register> [source_register]")
@@ -1453,8 +1729,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def increment_memory(self, ptr_reg: str) -> list:
-        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <non-zero>)"""
+    def increment_memory(self, ptr_reg: str) -> list[gadgets.Gadget]:
+        """Increment value in memory (e.g., incmem rax finds inc [rax] OR add [rax], <non-zero>).
+
+        Args:
+            ptr_reg: Register that must address modified memory.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that increment [{ptr_reg}]")
 
@@ -1523,8 +1806,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def decrement_memory(self, ptr_reg: str) -> list:
-        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <non-zero>)"""
+    def decrement_memory(self, ptr_reg: str) -> list[gadgets.Gadget]:
+        """Decrement value in memory (e.g., decmem rax finds dec [rax] OR sub [rax], <non-zero>).
+
+        Args:
+            ptr_reg: Register that must address modified memory.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding gadgets that decrement [{ptr_reg}]")
 
@@ -1597,8 +1887,15 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     @requires_arg
-    def push_register(self, reg: str) -> list:
-        """This method finds gadgets that push a register onto the stack without any other pop following."""
+    def push_register(self, reg: str) -> list[gadgets.Gadget]:
+        """This method finds gadgets that push a register onto the stack without any other pop following.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
 
@@ -1626,8 +1923,15 @@ class Terminal:
         return results
 
     @requires_arg
-    def pop_to_register(self, reg: str) -> list:
-        """This method finds gadgets that load a value from the stack into a specified register, typically through the pop instruction."""
+    def pop_to_register(self, reg: str) -> list[gadgets.Gadget]:
+        """This method finds gadgets that load a value from the stack into a specified register, typically through the pop instruction.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
 
@@ -1658,24 +1962,45 @@ class Terminal:
 
         return results
 
-    def push_all(self, fake_arg=None) -> list:
-        """Find PUSHAD/PUSHAL gadgets."""
+    def push_all(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find PUSHAD/PUSHAL gadgets.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding PUSHAD/PUSHAL gadgets")
         return [
             gadget for gadget in self._gadgets
             if any(instruction in {"pushad", "pushal"} for instruction in gadget.instructions)
         ]
 
-    def pop_all(self, fake_arg=None) -> list:
-        """Find POPAD/POPAL gadgets."""
+    def pop_all(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find POPAD/POPAL gadgets.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding POPAD/POPAL gadgets")
         return [
             gadget for gadget in self._gadgets
             if any(instruction in {"popad", "popal"} for instruction in gadget.instructions)
         ]
 
-    def find_ppr(self, fake_arg=None) -> list:
-        """Find gadgets with pop-pop-ret sequences (e.g., pop eax ; pop ebx ; ret)"""
+    def find_ppr(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find gadgets with pop-pop-ret sequences (e.g., pop eax ; pop ebx ; ret).
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding gadgets with pop-pop-ret sequences")
 
         # Define the pattern for pop-pop-ret gadgets
@@ -1684,8 +2009,15 @@ class Terminal:
         # Filter gadgets based on the regex pattern
         return [g for g in self._gadgets if re.search(pattern, g.raw, re.IGNORECASE)]
 
-    def stack_pivot(self, args: str = None) -> list:
-        """Find stack pivot gadgets (e.g., 'pivot' for all, 'pivot reg' for register-based, 'pivot imm' for immediate values)"""
+    def stack_pivot(self, args: str | None = None) -> list[gadgets.Gadget]:
+        """Find stack pivot gadgets (e.g., 'pivot' for all, 'pivot reg' for register-based, 'pivot imm' for immediate values).
+
+        Args:
+            args: Optional ``reg``, ``imm``, or specific register pivot selector.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         results = []
         mode = args.strip().lower() if args else "all"
@@ -1817,19 +2149,42 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     @requires_arg
-    def find_jump_gadgets(self, reg: str) -> list:
-        """Find jump-related gadgets (e.g., jmp esp, call esp, jmp [esp+0x10], etc.)"""
+    def find_jump_gadgets(self, reg: str) -> list[gadgets.Gadget]:
+        """Find jump-related gadgets (e.g., jmp esp, call esp, jmp [esp+0x10], etc.).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print(f"[*] Finding jump-related gadgets to {reg}")
         return self._find_indirect_transfers(reg, {"call", "jmp"})
 
     @requires_arg
-    def indirect_call(self, reg: str) -> list:
-        """Indirect call gadgets (e.g., call rax, call [rbx+0x10])"""
+    def indirect_call(self, reg: str) -> list[gadgets.Gadget]:
+        """Indirect call gadgets (e.g., call rax, call [rbx+0x10]).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         print(f"[*] Finding indirect call gadgets for {reg}")
         return self._find_indirect_transfers(reg, {"call"})
 
-    def _find_indirect_transfers(self, reg: str, operations: set[str]) -> list:
+    def _find_indirect_transfers(self, reg: str, operations: set[str]) -> list[gadgets.Gadget]:
+        """Find indirect transfers whose target register survives to dispatch.
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+            operations: Permitted indirect-control-transfer mnemonics.
+
+        Returns:
+            Matching indirect-transfer gadgets whose target survives dispatch.
+        """
         results = []
         for gadget in self._gadgets:
             if not registers.is_register(reg, gadget.arch):
@@ -1849,8 +2204,15 @@ class Terminal:
                     break
         return results
 
-    def find_return(self, fake_arg=None) -> list:
-        """Find pure RET/RETN gadgets."""
+    def find_return(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find pure RET/RETN gadgets.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding pure RET/RETN gadgets")
         return [
             gadget for gadget in self._gadgets
@@ -1859,8 +2221,15 @@ class Terminal:
         ]
 
     # https://www.felixcloutier.com/x86/iret:iretd:iretq
-    def find_ktouser(self, fake_arg=None) -> list:
-        """Find kernel->user transition gadgets (swapgs ; iretq)"""
+    def find_ktouser(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find kernel->user transition gadgets (swapgs ; iretq).
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding kernel->user transition gadgets (swapgs ; iretq)")
 
         patterns = [
@@ -1870,8 +2239,15 @@ class Terminal:
 
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
-    def find_syscall(self, fake_arg=None) -> list:
-        """Find syscall/sysenter gadgets for usermode transitions"""
+    def find_syscall(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find syscall/sysenter gadgets for usermode transitions.
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding syscall/sysenter gadgets")
 
         # Match syscall and sysenter instructions
@@ -1885,8 +2261,15 @@ class Terminal:
 
         return [g for g in self._gadgets if any(re.search(p, g.raw, re.IGNORECASE) for p in patterns)]
 
-    def load_cr(self, reg: str = None) -> list:
-        """Find gadgets that load control registers (e.g., loadcr rcx finds mov cr4, rcx)"""
+    def load_cr(self, reg: str | None = None) -> list[gadgets.Gadget]:
+        """Find gadgets that load control registers (e.g., loadcr rcx finds mov cr4, rcx).
+
+        Args:
+            reg: Register name, optionally followed by a query constraint.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
 
         if not reg:
             print("[!] Usage: loadcr <source_register>")
@@ -1924,8 +2307,15 @@ class Terminal:
 
         return results
 
-    def find_nop(self, fake_arg=None) -> list:
-        """Find TRUE NOP sequences (single-byte NOPs only, no stack manipulation)"""
+    def find_nop(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find TRUE NOP sequences (single-byte NOPs only, no stack manipulation).
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding true NOP sequences")
 
         results = []
@@ -1951,8 +2341,15 @@ class Terminal:
 
         return results
 
-    def find_functional_nop(self, fake_arg=None) -> list:
-        """Find functional NOP sequences (add rax, 0; mov rax, rax; etc.)"""
+    def find_functional_nop(self, fake_arg: str | None = None) -> list[gadgets.Gadget]:
+        """Find functional NOP sequences (add rax, 0; mov rax, rax; etc.).
+
+        Args:
+            fake_arg: Unused argument accepted for uniform command dispatch.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         print("[*] Finding functional NOP sequences")
 
         functional_nop_patterns = [

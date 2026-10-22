@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 from . import registers
 
@@ -24,7 +25,16 @@ WRITE_ONLY_MNEMONICS = {
 WIDTHS = {"byte": 8, "word": 16, "dword": 32, "qword": 64}
 
 
-def analyze(instructions: list[str], arch: str) -> dict:
+def analyze(instructions: list[str], arch: str) -> dict[str, Any]:
+    """Model register, stack, memory, and control effects for a gadget.
+
+    Args:
+        instructions: Normalized machine instructions in execution order.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Semantic model containing register, memory, stack, control-flow, and quality effects.
+    """
     word_size = 8 if arch == "x64" else 4
     stack_delta = 0
     stack_before_return = 0
@@ -225,7 +235,16 @@ def analyze(instructions: list[str], arch: str) -> dict:
     return semantics
 
 
-def quality_score(semantics: dict, instruction_count: int) -> dict:
+def quality_score(semantics: dict[str, Any], instruction_count: int) -> dict[str, Any]:
+    """Compute a deterministic side-effect cost vector.
+
+    Args:
+        semantics: Analyzed gadget side effects.
+        instruction_count: Number of instructions in the gadget.
+
+    Returns:
+        Total score and its weighted side-effect components.
+    """
     components = {
         "instructions": instruction_count,
         "clobbers": len(semantics["clobbers"]) * 4,
@@ -240,6 +259,14 @@ def quality_score(semantics: dict, instruction_count: int) -> dict:
 
 
 def split_instruction(instruction: str) -> tuple[str, list[str]]:
+    """Split a normalized instruction into mnemonic and operands.
+
+    Args:
+        instruction: Normalized machine instruction to parse or classify.
+
+    Returns:
+        Lowercase mnemonic and normalized operands.
+    """
     parts = instruction.strip().lower().split(maxsplit=1)
     mnemonic = parts[0] if parts else ""
     operands = [item.strip() for item in parts[1].split(",")] if len(parts) > 1 else []
@@ -247,6 +274,15 @@ def split_instruction(instruction: str) -> tuple[str, list[str]]:
 
 
 def _extract_registers(operand: str, arch: str) -> list[str]:
+    """Extract canonical registers referenced by an operand.
+
+    Args:
+        operand: Instruction operand to inspect.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Canonical registers in first-occurrence order.
+    """
     found = []
     for token in re.findall(r"\b(?:r1[0-5]|r[8-9]|[re]?[abcd]x|[re]?[sd]i|[re]?[sb]p|[abcd][hl]|[sd]il|[sb]pl|r1[0-5][dwbl]|r[8-9][dwbl])\b", operand.lower()):
         if registers.is_register(token, arch):
@@ -255,12 +291,29 @@ def _extract_registers(operand: str, arch: str) -> list[str]:
 
 
 def _record_read(operand: str, register_reads: set[str], memory_reads: list[str], arch: str) -> None:
+    """Record register and memory reads caused by an operand.
+
+    Args:
+        operand: Instruction operand to inspect.
+        register_reads: Register-read set to update.
+        memory_reads: Memory-read expressions to update.
+        arch: Target architecture, either ``x86`` or ``x64``.
+    """
     register_reads.update(_extract_registers(operand, arch))
     if "[" in operand:
         memory_reads.append(_normalize_memory(operand))
 
 
 def _record_write(operand: str, register_reads: set[str], register_writes: set[str], memory_writes: list[str], arch: str) -> None:
+    """Record register and memory writes caused by an operand.
+
+    Args:
+        operand: Instruction operand to inspect.
+        register_reads: Register-read set to update.
+        register_writes: Register-write set to update.
+        memory_writes: Memory-write expressions to update.
+        arch: Target architecture, either ``x86`` or ``x64``.
+    """
     if "[" in operand:
         register_reads.update(_extract_registers(operand, arch))
         memory_writes.append(_normalize_memory(operand))
@@ -268,7 +321,17 @@ def _record_write(operand: str, register_reads: set[str], register_writes: set[s
         register_writes.update(_extract_registers(operand, arch))
 
 
-def _assign(mnemonic: str, destination: str, sources: list[str], assignments: dict, write_details: dict, arch: str) -> None:
+def _assign(mnemonic: str, destination: str, sources: list[str], assignments: dict[str, Any], write_details: dict[str, Any], arch: str) -> None:
+    """Record a symbolic destination assignment when supported.
+
+    Args:
+        mnemonic: Normalized instruction mnemonic.
+        destination: Destination operand written by the instruction.
+        sources: Source operands read by the instruction.
+        assignments: Symbolic register assignments to update.
+        write_details: Register-width metadata to update.
+        arch: Target architecture, either ``x86`` or ``x64``.
+    """
     if "[" in destination:
         return
     target_registers = _extract_registers(destination, arch)
@@ -306,7 +369,16 @@ def _assign(mnemonic: str, destination: str, sources: list[str], assignments: di
     assignments[target] = assignment
 
 
-def _operand_effect(operand: str, arch: str) -> dict:
+def _operand_effect(operand: str, arch: str) -> dict[str, Any]:
+    """Describe an operand as a register, immediate, or memory effect.
+
+    Args:
+        operand: Instruction operand to inspect.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Symbolic register, immediate, memory, or unresolved-symbol effect.
+    """
     normalized = operand.strip().lower()
     if "[" in normalized:
         return {"kind": "memory", "address": _normalize_memory(normalized), "width": _operand_width(normalized, arch)}
@@ -319,7 +391,16 @@ def _operand_effect(operand: str, arch: str) -> dict:
     return {"kind": "symbol", "value": normalized}
 
 
-def _write_detail(operand: str, arch: str) -> dict:
+def _write_detail(operand: str, arch: str) -> dict[str, Any]:
+    """Describe the register width and partial-write behavior.
+
+    Args:
+        operand: Instruction operand to inspect.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Destination width and zero-extension or partial-write flags.
+    """
     word_bits = 64 if arch == "x64" else 32
     width = _operand_width(operand, arch)
     return {
@@ -330,6 +411,15 @@ def _write_detail(operand: str, arch: str) -> dict:
 
 
 def _operand_width(operand: str, arch: str) -> int:
+    """Return the operand width in bits.
+
+    Args:
+        operand: Instruction operand to inspect.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Operand width in bits.
+    """
     normalized = operand.lower().strip()
     for prefix, width in WIDTHS.items():
         if re.match(rf"^{prefix}\s", normalized):
@@ -350,7 +440,17 @@ def _operand_width(operand: str, arch: str) -> int:
     return 64 if arch == "x64" else 32
 
 
-def _record_memory_effects(destination: str, source: str, reads: list[dict], writes: list[dict], arch: str, read_destination: bool = False) -> None:
+def _record_memory_effects(destination: str, source: str, reads: list[dict[str, Any]], writes: list[dict[str, Any]], arch: str, read_destination: bool = False) -> None:
+    """Record symbolic memory reads and writes for an instruction.
+
+    Args:
+        destination: Destination operand written by the instruction.
+        source: Source operand read by the instruction.
+        reads: Structured memory reads to update.
+        writes: Structured memory writes to update.
+        arch: Target architecture, either ``x86`` or ``x64``.
+        read_destination: Whether a read-modify-write destination is also recorded as read.
+    """
     if "[" in source:
         reads.append({
             "address": _normalize_memory(source),
@@ -367,7 +467,17 @@ def _record_memory_effects(destination: str, source: str, reads: list[dict], wri
             reads.append({"address": effect["address"], "width": effect["width"]})
 
 
-def _control_effect(mnemonic: str, operands: list[str], arch: str) -> dict:
+def _control_effect(mnemonic: str, operands: list[str], arch: str) -> dict[str, Any]:
+    """Describe one explicit control-flow transition.
+
+    Args:
+        mnemonic: Normalized instruction mnemonic.
+        operands: Instruction operands in source order.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Structured transfer kind, target, and transition metadata.
+    """
     effect = {"kind": mnemonic}
     if operands:
         effect["target"] = _operand_effect(operands[0], arch)
@@ -379,10 +489,26 @@ def _control_effect(mnemonic: str, operands: list[str], arch: str) -> dict:
 
 
 def _normalize_memory(operand: str) -> str:
+    """Normalize a bracketed memory expression.
+
+    Args:
+        operand: Instruction operand to inspect.
+
+    Returns:
+        Bracketed address expression without memory-width qualifiers.
+    """
     return re.sub(r"^(?:byte|word|dword|qword)\s+(?:ptr\s+)?", "", operand).strip()
 
 
 def _parse_immediate(operand: str) -> int | None:
+    """Parse a hexadecimal or decimal immediate value.
+
+    Args:
+        operand: Instruction operand to inspect.
+
+    Returns:
+        Parsed integer, or ``None`` when the operand is not an immediate.
+    """
     value = operand.strip()
     try:
         return int(value, 0)
@@ -391,14 +517,39 @@ def _parse_immediate(operand: str) -> int | None:
 
 
 def _is_stack_pointer(operand: str, arch: str) -> bool:
+    """Return whether an operand aliases the architecture stack pointer.
+
+    Args:
+        operand: Instruction operand to inspect.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        True when an operand aliases the architecture stack pointer; otherwise ``False``.
+    """
     return registers.canonical_register(operand.strip(), arch) == ("rsp" if arch == "x64" else "esp")
 
 
 def _ordered_unique(values: list[str]) -> list[str]:
+    """Remove duplicate strings while preserving encounter order.
+
+    Args:
+        values: Strings from which duplicates are removed.
+
+    Returns:
+        Strings in first-occurrence order with duplicates removed.
+    """
     return list(dict.fromkeys(values))
 
 
-def _unique_dicts(values: list[dict]) -> list[dict]:
+def _unique_dicts(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate dictionaries while preserving encounter order.
+
+    Args:
+        values: Dictionaries from which duplicates are removed.
+
+    Returns:
+        Dictionaries in first-occurrence order with duplicates removed.
+    """
     seen = set()
     results = []
     for value in values:

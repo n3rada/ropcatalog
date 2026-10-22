@@ -156,13 +156,13 @@ SINGLE_OPERAND_MODIFIERS: Set[str] = {"inc", "dec", "neg", "not", "pop", "bswap"
 def get_registers(arch: str) -> Set[str]:
     """
     Get all registers for the given architecture.
-    
+
     Args:
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         Set of all valid register names for the architecture
-        
+
     Examples:
         >>> get_registers('x64')
         {'rax', 'rbx', 'rcx', ..., 'r15b', 'sil', 'dil'}
@@ -174,15 +174,15 @@ def get_registers(arch: str) -> Set[str]:
 def get_volatile_registers(arch: str) -> Set[str]:
     """
     Get volatile (caller-saved) registers for the given architecture.
-    
+
     Volatile registers do not need to be preserved across function calls.
-    
+
     Args:
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         Set of volatile register names
-        
+
     Examples:
         >>> get_volatile_registers('x64')
         {'rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11', ...}
@@ -194,15 +194,15 @@ def get_volatile_registers(arch: str) -> Set[str]:
 def get_nonvolatile_registers(arch: str) -> Set[str]:
     """
     Get non-volatile (callee-saved) registers for the given architecture.
-    
+
     Non-volatile registers must be preserved across function calls.
-    
+
     Args:
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         Set of non-volatile register names
-        
+
     Examples:
         >>> get_nonvolatile_registers('x64')
         {'rbx', 'rbp', 'rsi', 'rdi', 'rsp', 'r12', 'r13', 'r14', 'r15', ...}
@@ -214,16 +214,16 @@ def get_nonvolatile_registers(arch: str) -> Set[str]:
 def get_sub_registers(arch: str) -> Dict[str, List[str]]:
     """
     Get sub-register mappings for the given architecture.
-    
+
     Returns a dictionary mapping each main register to its sub-registers.
     Used for detecting register modifications (e.g., modifying 'al' modifies 'rax').
-    
+
     Args:
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         Dictionary mapping register names to lists of their sub-registers
-        
+
     Examples:
         >>> get_sub_registers('x64')['rax']
         ['rax', 'eax', 'ax', 'al', 'ah']
@@ -233,6 +233,15 @@ def get_sub_registers(arch: str) -> Dict[str, List[str]]:
 
 
 def canonical_register(reg: str, arch: str = 'x86') -> str:
+    """Resolve a sub-register to its architecture-specific full register.
+
+    Args:
+        reg: Register name, optionally followed by a query constraint.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Architecture-width register name, or the normalized input when unknown.
+    """
     reg = reg.lower().strip()
     for canonical, aliases in get_sub_registers(arch).items():
         if reg in aliases:
@@ -243,14 +252,14 @@ def canonical_register(reg: str, arch: str = 'x86') -> str:
 def is_register(operand: str, arch: str = 'x86') -> bool:
     """
     Check if the operand is a valid register for the given architecture.
-    
+
     Args:
         operand: The operand to check (e.g., 'rax', '0x123', 'ecx')
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         True if operand is a valid register, False otherwise
-        
+
     Examples:
         >>> is_register('rax', 'x64')
         True
@@ -274,14 +283,14 @@ def is_register(operand: str, arch: str = 'x86') -> bool:
 def is_volatile(reg: str, arch: str = 'x86') -> bool:
     """
     Check if a register is volatile (caller-saved).
-    
+
     Args:
         reg: Register name to check
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         True if register is volatile, False otherwise
-        
+
     Examples:
         >>> is_volatile('rax', 'x64')
         True
@@ -296,14 +305,14 @@ def is_volatile(reg: str, arch: str = 'x86') -> bool:
 def is_nonvolatile(reg: str, arch: str = 'x86') -> bool:
     """
     Check if a register is non-volatile (callee-saved).
-    
+
     Args:
         reg: Register name to check
         arch: Architecture name ('x86' or 'x64')
-        
+
     Returns:
         True if register is non-volatile, False otherwise
-        
+
     Examples:
         >>> is_nonvolatile('rbx', 'x64')
         True

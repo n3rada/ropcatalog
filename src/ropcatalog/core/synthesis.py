@@ -1,8 +1,11 @@
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 import re
+from typing import Any
 
 from . import registers
+from .gadgets import Gadget
 
 
 ABI_ARGUMENTS = {
@@ -24,18 +27,23 @@ SUPPORTED_CONTROLS = {"call", "iret", "iretd", "iretq", "jmp", "ret", "retn", "s
 
 @dataclass(frozen=True)
 class SearchState:
-    gadgets: tuple
-    stack_inputs: tuple
-    values: tuple
-    memory_goals: tuple
+    gadgets: tuple[Gadget, ...]
+    stack_inputs: tuple[tuple[tuple[str, str], ...], ...]
+    values: tuple[tuple[str, str], ...]
+    memory_goals: tuple[int, ...]
     control_done: bool
     arch: str | None
     cost: int
-    trace: tuple = ()
+    trace: tuple[dict[str, Any], ...] = ()
 
 
 class SemanticIndex:
-    def __init__(self, gadget_list):
+    def __init__(self, gadget_list: Sequence[Gadget]) -> None:
+        """Index gadget effects for bounded candidate retrieval.
+
+        Args:
+            gadget_list: Gadgets in catalog or execution order.
+        """
         self.by_write = defaultdict(list)
         self.stack_write = defaultdict(list)
         self.by_move = defaultdict(list)
@@ -57,7 +65,26 @@ class SemanticIndex:
             for key in mapping:
                 mapping[key].sort(key=context_sort_key)
 
-    def candidates(self, state, desired, memory_goals, transition, per_effect):
+    def candidates(
+        self,
+        state: SearchState,
+        desired: dict[str, str],
+        memory_goals: list[dict[str, Any]],
+        transition: dict[str, Any] | None,
+        per_effect: int,
+    ) -> list[Gadget]:
+        """Return bounded gadgets that can advance an unsatisfied goal.
+
+        Args:
+            state: Immutable synthesis state before the operation.
+            desired: Required final register values.
+            memory_goals: Required symbolic memory writes.
+            transition: Required final control-flow transition.
+            per_effect: Maximum indexed candidates retained per effect.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         values = dict(state.values)
         options = {}
         missing = [target for target, value in desired.items() if values.get(target) != value]
@@ -87,15 +114,44 @@ class SemanticIndex:
                 options[gadget.identifier] = gadget
         return sorted(options.values(), key=lambda gadget: context_sort_key(gadget, {"live_values": values}))
 
-    def configure(self, accepted_ids):
+    def configure(self, accepted_ids: set[str]) -> None:
+        """Restrict candidate retrieval to gadgets accepted by constraints.
+
+        Args:
+            accepted_ids: Stable gadget IDs accepted by the active constraints.
+        """
         self.accepted_ids = accepted_ids
 
-    def _accepted(self, values):
+    def _accepted(self, values: Iterable[Gadget]) -> list[Gadget]:
+        """Filter indexed gadgets through the configured accepted-ID set.
+
+        Args:
+            values: Known symbolic register or stack values.
+
+        Returns:
+            Matching gadgets in active catalog order.
+        """
         return [gadget for gadget in values if gadget.identifier in self.accepted_ids]
 
 
 class Synthesizer:
-    def __init__(self, gadget_list, constraint_failures, constraints, search, index=None):
+    def __init__(
+        self,
+        gadget_list: Sequence[Gadget],
+        constraint_failures: Callable[[Gadget, dict[str, Any]], list[str]],
+        constraints: dict[str, Any],
+        search: dict[str, int],
+        index: SemanticIndex | None = None,
+    ) -> None:
+        """Configure bounded semantic chain search over accepted gadgets.
+
+        Args:
+            gadget_list: Gadgets in catalog or execution order.
+            constraint_failures: Callback returning failed constraints for a gadget.
+            constraints: Semantic filters and context-sensitive ranking constraints.
+            search: Bounded search parameters.
+            index: Semantic gadget index used to infer usable register sources.
+        """
         self.constraints = constraints
         self.constraint_failures = constraint_failures
         self.max_nodes = search["max_nodes"]
@@ -117,7 +173,18 @@ class Synthesizer:
         self.by_id = {gadget.identifier: gadget for gadget in self.index.gadgets if gadget.identifier in accepted_ids}
         self.failure = None
 
-    def solve(self, specification):
+    def solve(
+        self,
+        specification: dict[str, Any],
+    ) -> tuple[SearchState | None, list[dict[str, Any]], int, dict[str, int]]:
+        """Search for a minimum-cost chain satisfying the specification.
+
+        Args:
+            specification: Normalized chain synthesis specification.
+
+        Returns:
+            Best solved state, bounded alternatives, expanded-node count, and rejection counts.
+        """
         abi = specification["abi"]
         available_arches = sorted({gadget.arch for gadget in self.index.gadgets})
         constrained_arches = specification["constraints"].get("arch", [])
@@ -187,7 +254,27 @@ class Synthesizer:
         return None, alternatives, expanded, self.rejections
 
 
-def apply_gadget(state, gadget, desired, memory_goals, transition, seed_values=None):
+def apply_gadget(
+    state: SearchState,
+    gadget: Gadget,
+    desired: dict[str, str],
+    memory_goals: list[dict[str, Any]],
+    transition: dict[str, Any] | None,
+    seed_values: dict[str, str] | None = None,
+) -> SearchState | None:
+    """Apply modeled gadget effects to one immutable search state.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+        gadget: Gadget to inspect, rank, format, or apply.
+        desired: Required final register values.
+        memory_goals: Required symbolic memory writes.
+        transition: Required final control-flow transition.
+        seed_values: Known register values at the start of the search.
+
+    Returns:
+        Next immutable state, or ``None`` when the gadget is incompatible or loses progress.
+    """
     semantics = gadget.semantics
     if semantics["stack_delta"] is None or semantics["unknown"]:
         return None
@@ -271,7 +358,21 @@ def apply_gadget(state, gadget, desired, memory_goals, transition, seed_values=N
     return new_state
 
 
-def dependency_values(desired, values, assignments):
+def dependency_values(
+    desired: dict[str, str],
+    values: dict[str, str],
+    assignments: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """Propagate desired values backward through register assignments.
+
+    Args:
+        desired: Required final register values.
+        values: Known symbolic register or stack values.
+        assignments: Symbolic register assignments to update.
+
+    Returns:
+        Source-register values required by unresolved direct assignments.
+    """
     needed = {}
     for target, goal_value in desired.items():
         if values.get(target) == goal_value:
@@ -282,7 +383,19 @@ def dependency_values(desired, values, assignments):
     return needed
 
 
-def dependency_closure(desired, moves):
+def dependency_closure(
+    desired: dict[str, str],
+    moves: dict[tuple[str, str], list[Gadget]],
+) -> dict[str, str]:
+    """Compute register-value prerequisites reachable through move gadgets.
+
+    Args:
+        desired: Required final register values.
+        moves: Available destination-to-source register moves.
+
+    Returns:
+        Desired values propagated transitively to reachable source registers.
+    """
     needed = dict(desired)
     changed = True
     while changed:
@@ -294,7 +407,25 @@ def dependency_closure(desired, moves):
     return needed
 
 
-def infer_memory_values(desired, memory_goals, scratch, index, arch):
+def infer_memory_values(
+    desired: dict[str, str],
+    memory_goals: list[dict[str, Any]],
+    scratch: list[str],
+    index: SemanticIndex,
+    arch: str,
+) -> dict[str, str]:
+    """Infer pointer and value registers required by memory-write goals.
+
+    Args:
+        desired: Required final register values.
+        memory_goals: Required symbolic memory writes.
+        scratch: Candidate writable addresses used by the requested chain.
+        index: Semantic gadget index used to infer usable register sources.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Pointer and source-register seed values inferred from write goals.
+    """
     seeds = {}
     for goal_number, goal in enumerate(memory_goals):
         if scratch:
@@ -310,7 +441,16 @@ def infer_memory_values(desired, memory_goals, scratch, index, arch):
     return seeds
 
 
-def extract_address_registers(address, arch):
+def extract_address_registers(address: str, arch: str) -> list[str]:
+    """Extract canonical registers from a normalized address expression.
+
+    Args:
+        address: Extractor address, symbolic address, or emulator address being processed.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        Canonical registers referenced by the address expression.
+    """
     return [
         registers.canonical_register(token, arch)
         for token in re.findall(r"\b[a-z][a-z0-9]*\b", address.lower())
@@ -318,7 +458,21 @@ def extract_address_registers(address, arch):
     ]
 
 
-def evaluate(effect, values, stack_value=None):
+def evaluate(
+    effect: dict[str, Any],
+    values: dict[str, str],
+    stack_value: str | None = None,
+) -> str | None:
+    """Evaluate a symbolic effect against known register and stack values.
+
+    Args:
+        effect: Symbolic operand or memory effect to evaluate.
+        values: Known symbolic register or stack values.
+        stack_value: Value assigned to an unresolved stack effect.
+
+    Returns:
+        Resolved normalized value, symbolic expression, or ``None`` for unknown effects.
+    """
     kind = effect.get("kind")
     if kind == "stack":
         return stack_value
@@ -332,7 +486,16 @@ def evaluate(effect, values, stack_value=None):
     return None
 
 
-def evaluate_expression(operator, arguments):
+def evaluate_expression(operator: str, arguments: list[str | None]) -> str | None:
+    """Evaluate a supported integer expression or retain it symbolically.
+
+    Args:
+        operator: Symbolic arithmetic or assignment operator.
+        arguments: Symbolic expression arguments to evaluate.
+
+    Returns:
+        Resolved integer, retained symbolic expression, or ``None`` for invalid arguments.
+    """
     if not arguments or any(argument is None for argument in arguments):
         return None
     try:
@@ -356,7 +519,23 @@ def evaluate_expression(operator, arguments):
     return None if value is None else f"0x{value:x}"
 
 
-def memory_matches(effect, goal, values, arch):
+def memory_matches(
+    effect: dict[str, Any],
+    goal: dict[str, Any],
+    values: dict[str, str],
+    arch: str,
+) -> bool:
+    """Return whether a modeled memory effect satisfies one write goal.
+
+    Args:
+        effect: Symbolic operand or memory effect to evaluate.
+        goal: Memory-write goal being tested.
+        values: Known symbolic register or stack values.
+        arch: Target architecture, either ``x86`` or ``x64``.
+
+    Returns:
+        True when a modeled memory effect satisfies one write goal; otherwise ``False``.
+    """
     if normalize_address(effect["address"]) != normalize_address(goal["address"]):
         return False
     if goal.get("width") and effect.get("width") != goal["width"]:
@@ -370,7 +549,16 @@ def memory_matches(effect, goal, values, arch):
     return actual_value == expected
 
 
-def transition_matches(gadget, transition):
+def transition_matches(gadget: Gadget, transition: dict[str, Any]) -> bool:
+    """Return whether a gadget reaches the requested control target.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        transition: Required final control-flow transition.
+
+    Returns:
+        True when a gadget reaches the requested control target; otherwise ``False``.
+    """
     for effect in gadget.semantics["control_effects"]:
         if effect["kind"] != transition["kind"]:
             continue
@@ -385,7 +573,23 @@ def transition_matches(gadget, transition):
     return False
 
 
-def complete(state, desired, memory_goals, transition):
+def complete(
+    state: SearchState,
+    desired: dict[str, str],
+    memory_goals: list[dict[str, Any]],
+    transition: dict[str, Any] | None,
+) -> bool:
+    """Return whether every synthesis postcondition is satisfied.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+        desired: Required final register values.
+        memory_goals: Required symbolic memory writes.
+        transition: Required final control-flow transition.
+
+    Returns:
+        True when every synthesis postcondition is satisfied; otherwise ``False``.
+    """
     values = dict(state.values)
     return (
         all(values.get(register) == value for register, value in desired.items())
@@ -394,7 +598,23 @@ def complete(state, desired, memory_goals, transition):
     )
 
 
-def satisfaction(state, desired, memory_goals, transition):
+def satisfaction(
+    state: SearchState,
+    desired: dict[str, str],
+    memory_goals: list[dict[str, Any]],
+    transition: dict[str, Any] | None,
+) -> int:
+    """Count synthesis postconditions already satisfied by a state.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+        desired: Required final register values.
+        memory_goals: Required symbolic memory writes.
+        transition: Required final control-flow transition.
+
+    Returns:
+        Number of register, memory, and transition goals currently met.
+    """
     values = dict(state.values)
     return (
         sum(values.get(register) == value for register, value in desired.items())
@@ -403,16 +623,54 @@ def satisfaction(state, desired, memory_goals, transition):
     )
 
 
-def heuristic(state, desired, memory_goals, transition):
+def heuristic(
+    state: SearchState,
+    desired: dict[str, str],
+    memory_goals: list[dict[str, Any]],
+    transition: dict[str, Any] | None,
+) -> int:
+    """Estimate the remaining search cost from unsatisfied goals.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+        desired: Required final register values.
+        memory_goals: Required symbolic memory writes.
+        transition: Required final control-flow transition.
+
+    Returns:
+        Admissible count of goals that remain unsatisfied.
+    """
     maximum = len(desired) + len(memory_goals) + int(bool(transition))
     return (maximum - satisfaction(state, desired, memory_goals, transition)) * 20
 
 
-def state_key(state):
+def state_key(
+    state: SearchState,
+) -> tuple[tuple[tuple[str, str], ...], tuple[int, ...], bool, str | None]:
+    """Return the semantic identity used to deduplicate search states.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+
+    Returns:
+        Register, completed-memory, control, and architecture identity.
+    """
     return state.values, state.memory_goals, state.control_done, state.arch
 
 
-def context_cost(gadget, constraints=None):
+def context_cost(
+    gadget: Gadget,
+    constraints: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score gadget side effects in the supplied exploit context.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        constraints: Semantic filters and context-sensitive ranking constraints.
+
+    Returns:
+        Total context-sensitive score and weighted side-effect components.
+    """
     constraints = constraints or {}
     semantics = gadget.semantics
     desired_reads = set(constraints.get("require_reads", []))
@@ -430,12 +688,33 @@ def context_cost(gadget, constraints=None):
     return {"score": sum(components.values()), "components": components}
 
 
-def context_sort_key(gadget, constraints=None):
+def context_sort_key(
+    gadget: Gadget,
+    constraints: dict[str, Any] | None = None,
+) -> tuple[int, str, str, int, str]:
+    """Return a deterministic context-sensitive gadget ordering key.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        constraints: Semantic filters and context-sensitive ranking constraints.
+
+    Returns:
+        Context cost, provenance, address, and instruction ordering fields.
+    """
     cost = context_cost(gadget, constraints)
     return cost["score"], gadget.module or "", gadget.source_id or "", int(gadget.address, 16), gadget.raw
 
 
-def build_chain(state, specification):
+def build_chain(state: SearchState, specification: dict[str, Any]) -> dict[str, Any]:
+    """Serialize a solved state into words, frames, and validation issues.
+
+    Args:
+        state: Immutable synthesis state before the operation.
+        specification: Normalized chain synthesis specification.
+
+    Returns:
+        Resolved and symbolic chain words, per-step stack frames, renderings, and issues.
+    """
     gadgets = list(state.gadgets)
     stack_inputs = [dict(inputs) for inputs in state.stack_inputs]
     call = specification.get("call")
@@ -524,17 +803,55 @@ def build_chain(state, specification):
     }
 
 
-def gadget_word(gadget, bases):
+def gadget_word(gadget: Gadget, bases: dict[str, Any]) -> dict[str, Any]:
+    """Describe a gadget address as a chain word.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        bases: Known module base addresses used to resolve relative addresses.
+
+    Returns:
+        Serialized gadget address word.
+    """
     return address_word("gadget", gadget.module, gadget.address, gadget.address_kind, bases, gadget.identifier)
 
 
-def target_word(target, bases):
+def target_word(target: dict[str, Any], bases: dict[str, Any]) -> dict[str, Any]:
+    """Describe a direct or symbolic transfer target as a chain word.
+
+    Args:
+        target: Direct or symbolic control-transfer target.
+        bases: Known module base addresses used to resolve relative addresses.
+
+    Returns:
+        Serialized control-transfer target word.
+    """
     if "symbol" in target:
         return {"kind": "target", "value": target["symbol"], "resolved": False}
     return address_word("target", target.get("module"), target["address"], target.get("address_kind", "rva"), bases)
 
 
-def address_word(kind, module, address, address_kind, bases, gadget_id=None):
+def address_word(
+    kind: str,
+    module: str | None,
+    address: str,
+    address_kind: str,
+    bases: dict[str, Any],
+    gadget_id: str | None = None,
+) -> dict[str, Any]:
+    """Resolve or relocate an address-bearing chain word.
+
+    Args:
+        kind: Chain-word or address category.
+        module: Source module name.
+        address: Extractor address, symbolic address, or emulator address being processed.
+        address_kind: Interpretation of addresses as unknown, relative, or virtual.
+        bases: Known module base addresses used to resolve relative addresses.
+        gadget_id: Stable gadget identifier to include in the record.
+
+    Returns:
+        Address word with relocation and resolution metadata.
+    """
     result = {"kind": kind, "module": module, "address": address, "address_kind": address_kind}
     if gadget_id:
         result["gadget_id"] = gadget_id
@@ -552,7 +869,16 @@ def address_word(kind, module, address, address_kind, bases, gadget_id=None):
     return result
 
 
-def value_word(value, kind="value"):
+def value_word(value: Any, kind: str = "value") -> dict[str, Any]:
+    """Normalize a literal or symbolic value into a chain word.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        kind: Chain-word or address category.
+
+    Returns:
+        Normalized literal or symbolic value word.
+    """
     normalized = normalize_value(value) if value is not None else "<filler>"
     try:
         parsed = int(normalized, 0)
@@ -561,7 +887,19 @@ def value_word(value, kind="value"):
     return {"kind": kind, "value": f"0x{parsed:x}", "resolved": True}
 
 
-def call_frame(call, specification, word_size):
+def call_frame(
+    call: dict[str, Any], specification: dict[str, Any], word_size: int
+) -> list[dict[str, Any]]:
+    """Build ABI-specific return, shadow-space, and argument words.
+
+    Args:
+        call: ABI call goal to serialize.
+        specification: Normalized chain synthesis specification.
+        word_size: Target pointer width in bytes.
+
+    Returns:
+        Architecture ABI argument, shadow-space, and return words.
+    """
     words = [value_word(call.get("return", specification["filler"]), "return")]
     if specification["abi"] in {"windows-x64", "windows-x64-kernel"}:
         words.extend(value_word(specification["filler"], "shadow") for _ in range(4))
@@ -576,7 +914,19 @@ def call_frame(call, specification, word_size):
     return words
 
 
-def find_bad_words(words, word_size, bad_bytes):
+def find_bad_words(
+    words: list[dict[str, Any]], word_size: int, bad_bytes: list[str]
+) -> list[int]:
+    """Return resolved chain-word indexes containing forbidden bytes.
+
+    Args:
+        words: Serialized chain words to inspect.
+        word_size: Target pointer width in bytes.
+        bad_bytes: Forbidden byte values represented as two-digit hexadecimal strings.
+
+    Returns:
+        Indexes of resolved words containing a forbidden byte.
+    """
     if not bad_bytes:
         return []
     forbidden = {int(value, 16) for value in bad_bytes}
@@ -590,7 +940,15 @@ def find_bad_words(words, word_size, bad_bytes):
     return results
 
 
-def render_chain(chain):
+def render_chain(chain: dict[str, Any]) -> dict[str, str]:
+    """Render a serialized chain as Python and pwntools source.
+
+    Args:
+        chain: Serialized chain containing gadget and stack words.
+
+    Returns:
+        Equivalent Python and pwntools chain source.
+    """
     expressions = [word_expression(word) for word in chain["words"]]
     pack = "<Q" if chain["word_size"] == 8 else "<L"
     python = ["from struct import pack", "rop = b\"\""]
@@ -602,7 +960,15 @@ def render_chain(chain):
     return {"python": "\n".join(python), "pwntools": "\n".join(pwntools)}
 
 
-def word_expression(word):
+def word_expression(word: dict[str, Any]) -> str:
+    """Return a source-code expression for one serialized chain word.
+
+    Args:
+        word: Serialized chain word.
+
+    Returns:
+        Source-code expression preserving resolution and relocation.
+    """
     if word.get("resolved"):
         return word["value"]
     if word.get("address_kind") == "rva":
@@ -612,7 +978,15 @@ def word_expression(word):
     return value or "value"
 
 
-def normalize_value(value):
+def normalize_value(value: Any) -> str:
+    """Normalize a literal or symbolic exploit value to text.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+
+    Returns:
+        Canonical integer literal or stripped symbolic value.
+    """
     if isinstance(value, bool):
         return str(value).lower()
     if isinstance(value, int):
@@ -620,6 +994,14 @@ def normalize_value(value):
     return str(value).strip()
 
 
-def normalize_address(value):
+def normalize_address(value: str) -> str:
+    """Normalize a memory address expression for semantic comparison.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+
+    Returns:
+        Whitespace-free bracketed address expression.
+    """
     value = re.sub(r"^(?:byte|word|dword|qword)\s+(?:ptr\s+)?", "", value.lower()).strip()
     return re.sub(r"\s+", "", value)

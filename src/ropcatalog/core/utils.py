@@ -9,7 +9,14 @@ from chardet import UniversalDetector
 
 
 def detect_arch_from_text(content: str) -> str:
-    """Detect x86 or x64 architecture from gadget extractor output."""
+    """Detect x86 or x64 architecture from gadget extractor output.
+
+    Args:
+        content: Gadget extractor output to inspect.
+
+    Returns:
+        Detected ``x86`` or ``x64`` architecture.
+    """
     for line in content.splitlines():
         line = line.strip().lower()
         if line.startswith("fileformat:") and "arch:" in line:
@@ -92,7 +99,7 @@ def detect_arch_from_file(file_path: Path, encoding: str | None = None) -> str:
         raise SystemExit(1)
 
 
-def format_bad_chars(bad_chars_string: str) -> list:
+def format_bad_chars(bad_chars_string: str) -> list[str]:
     """
     Formats a string of bad characters (e.g. '\\x00\\x0a') into a list of hex strings in lowercase.
 

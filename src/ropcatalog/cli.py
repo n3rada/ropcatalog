@@ -6,7 +6,9 @@ import io
 import json
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, TextIO
 
 # Local library imports
 from .core import gadgets
@@ -23,28 +25,28 @@ class Query:
     identifier: str
     command: str
     raw_gadget: bool = False
-    constraints: dict = field(default_factory=dict)
+    constraints: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class PlanStep:
     command: str
     raw_gadget: bool = False
-    constraints: dict = field(default_factory=dict)
-    values: dict = field(default_factory=dict)
+    constraints: dict[str, Any] = field(default_factory=dict)
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Plan:
     identifier: str
     steps: tuple[PlanStep, ...]
-    alignment: dict | None = None
+    alignment: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
 class Synthesis:
     identifier: str
-    specification: dict
+    specification: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -53,8 +55,27 @@ class GadgetLookup:
     gadget_id: str
 
 
+BatchRequest = Query | Plan | Synthesis | GadgetLookup
+
+
 class RopCatalogArgumentParser(argparse.ArgumentParser):
-    def parse_args(self, args=None, namespace=None):
+    def parse_args(
+        self,
+        args: Sequence[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> argparse.Namespace:
+        """Parse arguments and reject conflicting input/output contracts.
+
+        Args:
+            args: Arguments to parse, or ``None`` to read ``sys.argv``.
+            namespace: Existing namespace populated by ``argparse``, if any.
+
+        Returns:
+            Validated command-line namespace.
+
+        Raises:
+            SystemExit: If the parsed arguments violate a CLI input or output contract.
+        """
         parsed = super().parse_args(args, namespace)
         noninteractive = (
             parsed.command is not None
@@ -114,6 +135,18 @@ class RopCatalogArgumentParser(argparse.ArgumentParser):
 
 
 def positive_integer(value: str) -> int:
+    """Parse an integer greater than zero for ``argparse``.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+
+    Returns:
+        Parsed positive integer.
+
+    Raises:
+        ValueError: If the value is not a decimal integer.
+        argparse.ArgumentTypeError: If the parsed integer is not greater than zero.
+    """
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be greater than zero")
@@ -121,6 +154,17 @@ def positive_integer(value: str) -> int:
 
 
 def output_fields(value: str) -> tuple[str, ...]:
+    """Parse and validate a comma-delimited JSONL field selection.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+
+    Returns:
+        Deduplicated field names in user-specified order.
+
+    Raises:
+        argparse.ArgumentTypeError: If no fields or unsupported fields are supplied.
+    """
     available = {
         "address", "address_kind", "arch", "bytes", "cost", "extractor", "extractor_version",
         "formatted", "id", "instructions", "module", "raw", "semantics", "source_id",
@@ -136,12 +180,28 @@ def output_fields(value: str) -> tuple[str, ...]:
 
 
 def non_empty_string(value: str) -> str:
+    """Reject empty or whitespace-only command-line strings.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+
+    Returns:
+        Original non-empty string.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is empty or only whitespace.
+    """
     if not value.strip():
         raise argparse.ArgumentTypeError("must not be empty")
     return value
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the complete command-line argument parser.
+
+    Returns:
+        Fully configured ``ropcatalog`` argument parser.
+    """
     parser = RopCatalogArgumentParser(
         prog="ropcatalog",
         add_help=True,
@@ -281,7 +341,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_batch_queries(path: str) -> list[Query]:
+def parse_batch_queries(path: str) -> list[BatchRequest]:
+    """Read and validate plain or JSONL batch requests.
+
+    Args:
+        path: Batch request path, or ``-`` for standard input.
+
+    Returns:
+        Validated requests in input order.
+
+    Raises:
+        ValueError: If the path cannot be read or any request is invalid.
+    """
     if path == "-":
         lines = sys.stdin
     else:
@@ -298,7 +369,19 @@ def parse_batch_queries(path: str) -> list[Query]:
     return queries
 
 
-def _parse_batch_line(line: str, line_number: int):
+def _parse_batch_line(line: str, line_number: int) -> BatchRequest | None:
+    """Parse one batch input line into a typed request.
+
+    Args:
+        line: One batch-input line.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Typed request, or ``None`` for blank and comment lines.
+
+    Raises:
+        ValueError: If the line is not a supported plain or JSON request.
+    """
     line = line.strip()
     if not line or line.startswith("#"):
         return None
@@ -348,7 +431,19 @@ def _parse_batch_line(line: str, line_number: int):
     )
 
 
-def _parse_plan(request: dict, line_number: int) -> Plan:
+def _parse_plan(request: dict[str, Any], line_number: int) -> Plan:
+    """Validate and normalize a fixed-plan request.
+
+    Args:
+        request: Decoded JSON request object.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated fixed-plan request.
+
+    Raises:
+        ValueError: If the plan or one of its steps violates the request schema.
+    """
     steps = request["plan"]
     if not isinstance(steps, list) or not steps:
         raise ValueError(f"batch line {line_number} plan requires a non-empty step list")
@@ -389,7 +484,19 @@ def _parse_plan(request: dict, line_number: int) -> Plan:
     return Plan(str(request.get("id", line_number)), tuple(parsed_steps), alignment)
 
 
-def _parse_synthesis(request: dict, line_number: int) -> Synthesis:
+def _parse_synthesis(request: dict[str, Any], line_number: int) -> Synthesis:
+    """Validate and normalize a bounded synthesis request.
+
+    Args:
+        request: Decoded JSON request object.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated chain synthesis request.
+
+    Raises:
+        ValueError: If the synthesis specification violates its schema.
+    """
     value = request["synthesize"]
     if not isinstance(value, dict):
         raise ValueError(f"batch line {line_number} synthesize must be an object")
@@ -474,7 +581,19 @@ def _parse_synthesis(request: dict, line_number: int) -> Synthesis:
     return Synthesis(str(request.get("id", line_number)), specification)
 
 
-def _parse_set(value, line_number):
+def _parse_set(value: Any, line_number: int) -> dict[str, str | int]:
+    """Parse desired register values from a synthesis request.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Canonical desired register values.
+
+    Raises:
+        ValueError: If register assignments are malformed.
+    """
     if not isinstance(value, dict):
         raise ValueError(f"batch line {line_number} set must be an object keyed by general register")
     if not all(
@@ -487,7 +606,19 @@ def _parse_set(value, line_number):
     return {register.lower().strip(): target for register, target in value.items()}
 
 
-def _parse_writes(value, line_number):
+def _parse_writes(value: Any, line_number: int) -> list[dict[str, Any]]:
+    """Parse arbitrary-memory-write synthesis goals.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated arbitrary-memory-write goals.
+
+    Raises:
+        ValueError: If memory-write goals are malformed.
+    """
     if isinstance(value, dict):
         value = [value]
     if not isinstance(value, list):
@@ -511,7 +642,19 @@ def _parse_writes(value, line_number):
     return results
 
 
-def _parse_transition(value, line_number):
+def _parse_transition(value: Any, line_number: int) -> dict[str, Any] | None:
+    """Parse an optional indirect or privilege-transition goal.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated transition goal, or ``None`` when absent.
+
+    Raises:
+        ValueError: If the transition goal is malformed.
+    """
     if value is None:
         return None
     if not isinstance(value, dict) or "kind" not in value or set(value) - {"frame", "kind", "target"}:
@@ -534,7 +677,19 @@ def _parse_transition(value, line_number):
     return value
 
 
-def _parse_call(value, line_number):
+def _parse_call(value: Any, line_number: int) -> dict[str, Any] | None:
+    """Parse an optional direct ABI call goal.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated ABI call goal, or ``None`` when absent.
+
+    Raises:
+        ValueError: If the ABI call goal is malformed.
+    """
     if value is None:
         return None
     if not isinstance(value, dict) or set(value) - {"address", "address_kind", "arguments", "module", "return", "symbol"}:
@@ -557,7 +712,19 @@ def _parse_call(value, line_number):
     return result
 
 
-def _parse_search(value, line_number):
+def _parse_search(value: Any, line_number: int) -> dict[str, int]:
+    """Parse bounded beam-search limits.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Validated search bounds with defaults applied.
+
+    Raises:
+        ValueError: If search bounds are malformed.
+    """
     defaults = {"beam_width": 32, "max_depth": 8, "max_nodes": 5000, "per_effect": 16}
     if value is None:
         return defaults
@@ -570,7 +737,19 @@ def _parse_search(value, line_number):
     return defaults
 
 
-def _parse_bad_bytes(value, line_number):
+def _parse_bad_bytes(value: Any, line_number: int) -> list[str]:
+    """Parse hexadecimal bytes forbidden in resolved chain words.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Normalized forbidden byte strings.
+
+    Raises:
+        ValueError: If the forbidden-byte list is malformed.
+    """
     if isinstance(value, str):
         value = re.findall(r"(?:\\x)?([0-9a-fA-F]{2})", value)
     if not isinstance(value, list) or not all(isinstance(byte, str) and re.fullmatch(r"[0-9a-fA-F]{2}", byte) for byte in value):
@@ -578,7 +757,19 @@ def _parse_bad_bytes(value, line_number):
     return sorted(set(byte.lower() for byte in value))
 
 
-def _parse_scratch(value, line_number):
+def _parse_scratch(value: Any, line_number: int) -> list[str]:
+    """Parse candidate writable scratch addresses.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Normalized scratch address strings.
+
+    Raises:
+        ValueError: If a scratch address is malformed.
+    """
     if isinstance(value, (str, int)) and not isinstance(value, bool):
         value = [value]
     if not isinstance(value, list) or not all(isinstance(item, (str, int)) and not isinstance(item, bool) and str(item).strip() for item in value):
@@ -586,13 +777,43 @@ def _parse_scratch(value, line_number):
     return value
 
 
-def _parse_locked(value, line_number):
+def _parse_locked(value: Any, line_number: int) -> list[str]:
+    """Parse stable gadget IDs forced into the synthesized prefix.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Normalized locked gadget IDs.
+
+    Raises:
+        ValueError: If a locked gadget ID is malformed.
+    """
     if not isinstance(value, list) or not all(isinstance(item, str) and re.fullmatch(r"[0-9a-fA-F]{16}", item) for item in value):
         raise ValueError(f"batch line {line_number} locked must be a list of gadget IDs")
     return [item.lower() for item in value]
 
 
-def gadget_to_record(gadget, formatter, with_base_address: bool, fields=None, cost=None) -> dict:
+def gadget_to_record(
+    gadget: gadgets.Gadget,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    fields: tuple[str, ...] | None = None,
+    cost: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Serialize one gadget for JSONL output.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        fields: Optional JSONL gadget fields to retain.
+        cost: Precomputed context-sensitive gadget cost, if available.
+
+    Returns:
+        Machine-readable gadget record containing the selected fields.
+    """
     record = {
         "id": gadget.identifier,
         "source_id": gadget.source_id,
@@ -621,7 +842,19 @@ def gadget_to_record(gadget, formatter, with_base_address: bool, fields=None, co
     return record
 
 
-def _parse_constraints(value, line_number: int) -> dict:
+def _parse_constraints(value: Any, line_number: int) -> dict[str, Any]:
+    """Validate semantic filtering and ranking constraints.
+
+    Args:
+        value: Input value to parse, validate, or normalize.
+        line_number: One-based batch line number used in validation errors.
+
+    Returns:
+        Normalized filtering and ranking constraints.
+
+    Raises:
+        ValueError: If a constraint is unknown or malformed.
+    """
     if value is None:
         return {}
     if not isinstance(value, dict):
@@ -666,7 +899,18 @@ def _parse_constraints(value, line_number: int) -> dict:
     return constraints
 
 
-def _apply_constraints(candidates: list, constraints: dict) -> tuple[list, dict, dict]:
+def _apply_constraints(
+    candidates: list[gadgets.Gadget], constraints: dict[str, Any]
+) -> tuple[list[gadgets.Gadget], dict[str, int], dict[int, list[str]]]:
+    """Filter candidates and retain deterministic rejection evidence.
+
+    Args:
+        candidates: Candidate gadgets to filter, rank, or serialize.
+        constraints: Semantic filters and context-sensitive ranking constraints.
+
+    Returns:
+        Accepted gadgets, rejection counts, and failures per rejected object.
+    """
     accepted = []
     rejection_counts = Counter()
     rejected_by = {}
@@ -681,7 +925,18 @@ def _apply_constraints(candidates: list, constraints: dict) -> tuple[list, dict,
     return accepted, dict(sorted(rejection_counts.items())), rejected_by
 
 
-def _constraint_failures(gadget, constraints: dict) -> list[str]:
+def _constraint_failures(
+    gadget: gadgets.Gadget, constraints: dict[str, Any]
+) -> list[str]:
+    """Return every constraint violated by a gadget.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+        constraints: Semantic filters and context-sensitive ranking constraints.
+
+    Returns:
+        Constraint names violated by the gadget.
+    """
     semantic = gadget.semantics
     failures = []
     if "arch" in constraints and gadget.arch not in constraints["arch"]:
@@ -736,14 +991,28 @@ def _constraint_failures(gadget, constraints: dict) -> list[str]:
 
 
 def execute_queries(
-    console,
-    queries,
-    formatter,
+    console: terminal.Terminal,
+    queries: Sequence[BatchRequest],
+    formatter: formatters.GadgetFormatter,
     with_base_address: bool,
     limit: int | None,
-    diagnostics_stream=sys.stderr,
-    fields=None,
-) -> list[dict]:
+    diagnostics_stream: TextIO = sys.stderr,
+    fields: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Execute validated requests against a loaded catalog.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        queries: Validated lookup, query, plan, or synthesis requests.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        limit: Maximum number of gadgets to emit per request.
+        diagnostics_stream: Stream receiving non-result diagnostics.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        One result record for every input request.
+    """
     records = []
     for query in queries:
         if isinstance(query, GadgetLookup):
@@ -767,7 +1036,25 @@ def execute_queries(
     return records
 
 
-def _execute_lookup(console, lookup, formatter, with_base_address, fields):
+def _execute_lookup(
+    console: terminal.Terminal,
+    lookup: GadgetLookup,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    fields: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """Retrieve a gadget by stable identifier.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        lookup: Stable gadget-ID lookup request.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Stable-ID lookup record.
+    """
     matches = [gadget for gadget in console.gadgets if gadget.identifier == lookup.gadget_id]
     return {
         "schema": "ropcatalog.lookup.v1",
@@ -780,7 +1067,25 @@ def _execute_lookup(console, lookup, formatter, with_base_address, fields):
     }
 
 
-def _execute_synthesis(console, request, formatter, with_base_address, fields):
+def _execute_synthesis(
+    console: terminal.Terminal,
+    request: Synthesis,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    fields: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """Search, serialize, and optionally verify a synthesis request.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        request: Decoded JSON request object.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Synthesis result with chain and verification evidence when solved.
+    """
     specification = request.specification
     solver = synthesis.Synthesizer(
         console.gadgets,
@@ -898,7 +1203,19 @@ def _execute_synthesis(console, request, formatter, with_base_address, fields):
     return record
 
 
-def _search_candidates(console, query, diagnostics_stream) -> tuple[list, str | None]:
+def _search_candidates(
+    console: terminal.Terminal, query: Query, diagnostics_stream: TextIO
+) -> tuple[list[gadgets.Gadget], str | None]:
+    """Run one retrieval request while isolating routine diagnostics.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        query: Validated request to execute or serialize.
+        diagnostics_stream: Stream receiving non-result diagnostics.
+
+    Returns:
+        Candidate gadgets and an optional command error.
+    """
     console_input = query.command
     if query.raw_gadget and not query.command.startswith("?"):
         console_input = f"? {query.command}"
@@ -918,7 +1235,29 @@ def _search_candidates(console, query, diagnostics_stream) -> tuple[list, str | 
     return sorted(results, key=gadgets.sort_key), None
 
 
-def _query_record(query, candidates, error, formatter, with_base_address, limit, fields) -> dict:
+def _query_record(
+    query: Query,
+    candidates: list[gadgets.Gadget],
+    error: str | None,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    limit: int | None,
+    fields: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """Build a bounded query result with ranking and alternatives.
+
+    Args:
+        query: Validated request to execute or serialize.
+        candidates: Candidate gadgets to filter, rank, or serialize.
+        error: Failure reported while executing the request.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        limit: Maximum number of gadgets to emit per request.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Bounded query result including rank, cost, and alternatives.
+    """
     results, rejections, rejected_by = _apply_constraints(candidates, query.constraints)
     pareto = _pareto_gadget_ids(results, query.constraints)
     total = len(results)
@@ -968,7 +1307,21 @@ def _query_record(query, candidates, error, formatter, with_base_address, limit,
     return record
 
 
-def _pareto_gadget_ids(candidates, constraints, maximum=8):
+def _pareto_gadget_ids(
+    candidates: list[gadgets.Gadget],
+    constraints: dict[str, Any],
+    maximum: int = 8,
+) -> list[str]:
+    """Return non-dominated candidate IDs for side-effect tradeoffs.
+
+    Args:
+        candidates: Candidate gadgets to filter, rank, or serialize.
+        constraints: Semantic filters and context-sensitive ranking constraints.
+        maximum: Maximum number of alternatives to return.
+
+    Returns:
+        Stable IDs of non-dominated alternatives.
+    """
     front = []
     for gadget in candidates:
         cost = synthesis.context_cost(gadget, constraints)["components"]
@@ -981,11 +1334,40 @@ def _pareto_gadget_ids(candidates, constraints, maximum=8):
     return [gadget.identifier for gadget, _cost in front]
 
 
-def _dominates(left, right):
+def _dominates(left: dict[str, int], right: dict[str, int]) -> bool:
+    """Return whether the left cost vector Pareto-dominates the right.
+
+    Args:
+        left: Left side-effect cost vector.
+        right: Right side-effect cost vector.
+
+    Returns:
+        True if the left vector is no worse in every dimension and better in one.
+    """
     return all(left[name] <= right[name] for name in left) and any(left[name] < right[name] for name in left)
 
 
-def _execute_plan(console, plan, formatter, with_base_address, diagnostics_stream, fields) -> dict:
+def _execute_plan(
+    console: terminal.Terminal,
+    plan: Plan,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    diagnostics_stream: TextIO,
+    fields: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """Resolve a fixed sequence of dependent gadget goals.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        plan: Fixed sequence of gadget goals.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        diagnostics_stream: Stream receiving non-result diagnostics.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Resolved plan record or deterministic failure evidence.
+    """
     selected, selected_gadgets, failed_step = _search_plan(
         console, plan, formatter, with_base_address, diagnostics_stream, fields,
     )
@@ -1046,7 +1428,15 @@ def _execute_plan(console, plan, formatter, with_base_address, diagnostics_strea
     }
 
 
-def _extra_stack_bytes(gadget) -> int | None:
+def _extra_stack_bytes(gadget: gadgets.Gadget) -> int | None:
+    """Return stack adjustment bytes beyond pops and the return address.
+
+    Args:
+        gadget: Gadget to inspect, rank, format, or apply.
+
+    Returns:
+        Additional stack adjustment, or ``None`` for dynamic deltas.
+    """
     delta = gadget.semantics["stack_delta"]
     if delta is None:
         return None
@@ -1055,7 +1445,12 @@ def _extra_stack_bytes(gadget) -> int | None:
     return delta - expected
 
 
-def interface_contract() -> dict:
+def interface_contract() -> dict[str, Any]:
+    """Return the machine-readable interface and schema capabilities.
+
+    Returns:
+        Machine-readable supported input, query, schema, and verification capabilities.
+    """
     return {
         "schema": "ropcatalog.capabilities.v1",
         "inputs": ["rp++", "ROPgadget", "Ropper", "ropcatalog.catalog.v1"],
@@ -1106,12 +1501,36 @@ def interface_contract() -> dict:
     }
 
 
-def write_jsonl(records: list[dict], stream) -> None:
+def write_jsonl(records: list[dict[str, Any]], stream: TextIO) -> None:
+    """Write canonical one-object-per-line JSON records.
+
+    Args:
+        records: Machine-readable result records.
+        stream: Text stream receiving JSONL output.
+    """
     for record in records:
         print(json.dumps(record, separators=(",", ":"), sort_keys=True), file=stream)
 
 
-def serve_requests(console, formatter, with_base_address, limit, fields) -> int:
+def serve_requests(
+    console: terminal.Terminal,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    limit: int | None,
+    fields: tuple[str, ...] | None,
+) -> int:
+    """Serve JSONL requests against a catalog kept in memory.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        limit: Maximum number of gadgets to emit per request.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Zero after standard input reaches end-of-file.
+    """
     for line_number, line in enumerate(sys.stdin, 1):
         if not line.strip():
             continue
@@ -1135,7 +1554,17 @@ def serve_requests(console, formatter, with_base_address, limit, fields) -> int:
     return 0
 
 
-def write_module_artifacts(records: list[dict], artifact_dir: Path, modules: set[str]) -> list[Path]:
+def write_module_artifacts(records: list[dict[str, Any]], artifact_dir: Path, modules: set[str]) -> list[Path]:
+    """Write query records to deterministic per-module artifact files.
+
+    Args:
+        records: Machine-readable result records.
+        artifact_dir: Directory in which module-specific JSONL artifacts are written.
+        modules: Modules represented in the output records.
+
+    Returns:
+        Artifact paths in deterministic module order.
+    """
     artifact_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for module in sorted(modules):
@@ -1157,6 +1586,11 @@ def write_module_artifacts(records: list[dict], artifact_dir: Path, modules: set
 
 
 def main() -> int:
+    """Run the command-line interface and return a process exit code.
+
+    Returns:
+        Process exit status.
+    """
 
     parser = build_parser()
     args = parser.parse_args()
@@ -1311,7 +1745,27 @@ def main() -> int:
 
     return console.start()
 
-def _search_plan(console, plan, formatter, with_base_address, diagnostics_stream, fields):
+def _search_plan(
+    console: terminal.Terminal,
+    plan: Plan,
+    formatter: formatters.GadgetFormatter,
+    with_base_address: bool,
+    diagnostics_stream: TextIO,
+    fields: tuple[str, ...] | None,
+) -> tuple[list[dict[str, Any]], list[gadgets.Gadget], dict[str, Any] | None]:
+    """Backtrack over fixed-plan steps while preserving live values.
+
+    Args:
+        console: Terminal instance bound to the loaded gadget catalog.
+        plan: Fixed sequence of gadget goals.
+        formatter: Formatter used to render gadgets in output records.
+        with_base_address: Whether formatted addresses use module base expressions.
+        diagnostics_stream: Stream receiving non-result diagnostics.
+        fields: Optional JSONL gadget fields to retain.
+
+    Returns:
+        Serialized steps, chosen gadgets, and optional failure evidence.
+    """
     prepared = []
     for step_number, step in enumerate(plan.steps, 1):
         constraints = dict(step.constraints)
@@ -1330,7 +1784,25 @@ def _search_plan(console, plan, formatter, with_base_address, diagnostics_stream
     nodes = 0
     best = ([], [], None, set())
 
-    def visit(index, selected, selected_gadgets, selected_arch, live_values):
+    def visit(
+        index: int,
+        selected: list[dict[str, Any]],
+        selected_gadgets: list[gadgets.Gadget],
+        selected_arch: str | None,
+        live_values: set[str],
+    ) -> tuple[list[dict[str, Any]], list[gadgets.Gadget]] | None:
+        """Depth-first search a compatible gadget for each plan step.
+
+        Args:
+            index: Index of the next plan step to resolve.
+            selected: Serialized plan steps selected so far.
+            selected_gadgets: Plan gadgets selected so far.
+            selected_arch: Architecture fixed by preceding plan steps.
+            live_values: Register values that subsequent plan steps must preserve.
+
+        Returns:
+            Completed plan state, or ``None`` when the branch cannot satisfy all steps.
+        """
         nonlocal nodes, best
         if len(selected) > len(best[0]):
             best = (selected, selected_gadgets, selected_arch, live_values)

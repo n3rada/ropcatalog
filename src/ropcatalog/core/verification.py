@@ -1,7 +1,19 @@
 import re
+from collections.abc import Sequence
+from typing import Any
+
+from .gadgets import Gadget
 
 
-def verify_bytes(gadget_list):
+def verify_bytes(gadget_list: Sequence[Gadget]) -> dict[str, Any]:
+    """Re-disassemble extractor bytes and compare normalized instructions.
+
+    Args:
+        gadget_list: Gadgets whose extractor bytes should be verified.
+
+    Returns:
+        Capstone verification status and per-gadget comparison records.
+    """
     records = []
     if not gadget_list:
         return {"method": "capstone", "status": "not_requested", "executes_target_bytes": False, "gadgets": []}
@@ -46,7 +58,15 @@ def verify_bytes(gadget_list):
     }
 
 
-def _normalize(instruction):
+def _normalize(instruction: str) -> str:
+    """Normalize a disassembled instruction for extractor comparison.
+
+    Args:
+        instruction: Normalized machine instruction to parse or classify.
+
+    Returns:
+        Canonical instruction text used for byte comparisons.
+    """
     value = instruction.lower().replace(" ptr ", " ")
     value = re.sub(r"\s*,\s*", ",", value)
     value = re.sub(r"\s+", " ", value).strip()
@@ -54,7 +74,23 @@ def _normalize(instruction):
 
 
 
-def emulate_chain(gadget_list, chain, desired, scratch):
+def emulate_chain(
+    gadget_list: Sequence[Gadget],
+    chain: dict[str, Any],
+    desired: dict[str, Any],
+    scratch: list[Any],
+) -> dict[str, Any]:
+    """Execute resolved gadget bytes under bounded Unicorn emulation.
+
+    Args:
+        gadget_list: Resolved gadgets in chain execution order.
+        chain: Serialized chain containing gadget and stack words.
+        desired: Required final register values.
+        scratch: Candidate writable addresses used by the requested chain.
+
+    Returns:
+        Unicorn execution status, register evidence, and failure details.
+    """
     try:
         import unicorn
         from unicorn import x86_const
@@ -81,7 +117,12 @@ def emulate_chain(gadget_list, chain, desired, scratch):
     page_size = 0x1000
     mapped = set()
 
-    def map_page(address):
+    def map_page(address: int) -> None:
+        """Map one page once in the emulator address space.
+
+        Args:
+            address: Extractor address, symbolic address, or emulator address being processed.
+        """
         page = address & ~(page_size - 1)
         if page not in mapped:
             emulator.mem_map(page, page_size)
@@ -118,7 +159,15 @@ def emulate_chain(gadget_list, chain, desired, scratch):
         emulator.reg_write(stack_pointer, stack_base)
         executed = 0
 
-        def on_code(uc, address, size, user_data):
+        def on_code(uc: Any, address: int, size: int, user_data: Any) -> None:
+            """Count executed instructions and stop at the sentinel.
+
+            Args:
+                uc: Unicorn emulator invoking the hook.
+                address: Extractor address, symbolic address, or emulator address being processed.
+                size: Instruction size reported by the emulator hook.
+                user_data: Opaque Unicorn hook context, unused by this callback.
+            """
             nonlocal executed
             executed += 1
             if address == stop_address:
