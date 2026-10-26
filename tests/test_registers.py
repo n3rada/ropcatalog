@@ -5,7 +5,6 @@
 from ropcatalog.core.registers import (
     X86_REGISTERS,
     X64_REGISTERS,
-    X64_ADDITIONAL_REGISTERS,
     VOLATILE_X86,
     VOLATILE_X64,
     NONVOLATILE_X86,

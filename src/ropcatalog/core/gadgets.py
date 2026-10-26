@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 import time
 from collections.abc import Iterable, Iterator
-from typing import TextIO
+from typing import Any, TextIO
 
-# Local imports
+# Local library imports
 from . import registers
 from . import semantics
 
@@ -481,7 +481,7 @@ class Gadget:
         return self._arch
 
     @property
-    def semantics(self) -> dict[str, object]:
+    def semantics(self) -> dict[str, Any]:
         """Return the analyzed register, memory, stack, and control effects.
 
         Returns:

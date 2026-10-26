@@ -1,6 +1,8 @@
+# Built-in imports
 import re
 from typing import Any
 
+# Local library imports
 from . import registers
 
 
@@ -478,7 +480,7 @@ def _control_effect(mnemonic: str, operands: list[str], arch: str) -> dict[str, 
     Returns:
         Structured transfer kind, target, and transition metadata.
     """
-    effect = {"kind": mnemonic}
+    effect: dict[str, Any] = {"kind": mnemonic}
     if operands:
         effect["target"] = _operand_effect(operands[0], arch)
     if mnemonic in {"call", "int", "syscall", "sysenter"}:

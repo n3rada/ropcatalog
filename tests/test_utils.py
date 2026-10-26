@@ -2,8 +2,6 @@
 
 """Tests for utility functions."""
 
-import pytest
-from pathlib import Path
 from ropcatalog.core.utils import detect_arch_from_text, format_bad_chars, detect_arch_from_file, detect_file_encoding
 
 

@@ -1,3 +1,4 @@
+# Built-in imports
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 import re
@@ -13,8 +14,8 @@ except PackageNotFoundError:
             pyproject_path.read_text(encoding="utf-8"),
             re.MULTILINE,
         )
-        __version__ = version_match.group(1) + "-dev"
-    except (AttributeError, FileNotFoundError):
+        __version__ = f"{version_match.group(1)}-dev" if version_match else "unknown"
+    except FileNotFoundError:
         __version__ = "unknown"
 
 __all__ = ["__version__"]

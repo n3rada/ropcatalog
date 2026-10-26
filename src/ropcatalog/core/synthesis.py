@@ -1,9 +1,11 @@
+# Built-in imports
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 import re
 from typing import Any
 
+# Local library imports
 from . import registers
 from .gadgets import Gadget
 
@@ -498,10 +500,11 @@ def evaluate_expression(operator: str, arguments: list[str | None]) -> str | Non
     """
     if not arguments or any(argument is None for argument in arguments):
         return None
+    resolved_arguments = [argument for argument in arguments if argument is not None]
     try:
-        numbers = [int(argument, 0) for argument in arguments]
+        numbers = [int(argument, 0) for argument in resolved_arguments]
     except (TypeError, ValueError):
-        return f"{operator}({','.join(str(argument) for argument in arguments)})"
+        return f"{operator}({','.join(resolved_arguments)})"
     if operator in {"inc", "dec", "neg", "not", "bswap"}:
         value = {"inc": numbers[0] + 1, "dec": numbers[0] - 1, "neg": -numbers[0], "not": ~numbers[0]} .get(operator)
         if operator == "bswap":

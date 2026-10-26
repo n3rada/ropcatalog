@@ -1,7 +1,10 @@
+# Built-in imports
+import importlib
 import re
 from collections.abc import Sequence
 from typing import Any
 
+# Local library imports
 from .gadgets import Gadget
 
 
@@ -18,7 +21,7 @@ def verify_bytes(gadget_list: Sequence[Gadget]) -> dict[str, Any]:
     if not gadget_list:
         return {"method": "capstone", "status": "not_requested", "executes_target_bytes": False, "gadgets": []}
     try:
-        import capstone
+        capstone = importlib.import_module("capstone")
     except ImportError:
         return {
             "method": "capstone",
@@ -30,12 +33,13 @@ def verify_bytes(gadget_list: Sequence[Gadget]) -> dict[str, Any]:
 
     complete = True
     for gadget in gadget_list:
-        if gadget.bytes_hex is None:
+        bytes_hex = gadget.bytes_hex
+        if bytes_hex is None:
             complete = False
             records.append({"gadget_id": gadget.identifier, "status": "unavailable", "failure": "opcode bytes absent"})
             continue
         try:
-            code = bytes.fromhex(gadget.bytes_hex)
+            code = bytes.fromhex(bytes_hex)
         except ValueError:
             complete = False
             records.append({"gadget_id": gadget.identifier, "status": "invalid_bytes"})
@@ -92,8 +96,8 @@ def emulate_chain(
         Unicorn execution status, register evidence, and failure details.
     """
     try:
-        import unicorn
-        from unicorn import x86_const
+        unicorn = importlib.import_module("unicorn")
+        x86_const = importlib.import_module("unicorn.x86_const")
     except ImportError:
         return {
             "method": "unicorn",
@@ -131,7 +135,10 @@ def emulate_chain(
     try:
         for gadget in gadget_list:
             address = int(gadget_words[gadget.identifier]["value"], 0)
-            code = bytes.fromhex(gadget.bytes_hex)
+            bytes_hex = gadget.bytes_hex
+            if bytes_hex is None:
+                raise ValueError("opcode bytes absent")
+            code = bytes.fromhex(bytes_hex)
             for page_address in range(address & ~(page_size - 1), (address + len(code) + page_size - 1) & ~(page_size - 1), page_size):
                 map_page(page_address)
             emulator.mem_write(address, code)
