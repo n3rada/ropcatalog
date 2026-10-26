@@ -1,4 +1,4 @@
-# ropcatalog/core/terminal.py
+# ropcatalog/interface/terminal.py
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from __future__ import annotations
 import os
 import re
 import sys
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import Any, Protocol
 
 # Third party library imports
 from prompt_toolkit import PromptSession
@@ -17,10 +17,48 @@ from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.completion import WordCompleter
 
 # Local library imports
-from . import gadgets
+from ..core import gadgets
+from ..core import registers
+from ..core import synthesis
 from . import formatters
-from . import registers
-from . import synthesis
+
+
+class GadgetCatalog(Protocol):
+    """Catalog operations consumed by the interactive interface."""
+
+    _unique_mode: bool
+
+    def __iter__(self) -> Iterator[gadgets.Gadget]:
+        """Iterate over active gadgets.
+
+        Returns:
+            Iterator over the active gadget view.
+        """
+        ...
+
+    def __len__(self) -> int:
+        """Return the active gadget count.
+
+        Returns:
+            Number of active gadgets.
+        """
+        ...
+
+    def set_uniqueness(self, enabled: bool) -> None:
+        """Configure gadget deduplication.
+
+        Args:
+            enabled: Whether per-module gadget uniqueness is enabled.
+        """
+        ...
+
+    def use_full_catalog(self, enabled: bool) -> None:
+        """Select the full or filtered catalog view.
+
+        Args:
+            enabled: Whether unstable gadgets are included.
+        """
+        ...
 
 
 def requires_arg(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -55,7 +93,7 @@ class Terminal:
     # ──────────────────────────────────────────────────────────────────
 
     def __init__(self,
-        full_catalog: "gadgets.Gadgets",
+        full_catalog: GadgetCatalog,
         formatter: "formatters.GadgetFormatter | None" = None,
         with_base_address: bool = False,
     ) -> None:
@@ -67,7 +105,7 @@ class Terminal:
             with_base_address: Whether formatted addresses use module base expressions.
         """
         self._gadgets = full_catalog
-        self._formatter = formatter
+        self._formatter: formatters.GadgetFormatter = formatter or formatters.PlainFormatter()
         self._with_base_address = with_base_address
         self._semantic_index = None
 
@@ -208,15 +246,15 @@ class Terminal:
             self._gadgets.use_full_catalog(True)
 
         # Execute the command
-        results = self._commands[cmd](args) or []
+        try:
+            results = self._commands[cmd](args) or []
+        finally:
+            if use_full_catalog:
+                self._gadgets.use_full_catalog(False)
 
         # Filter for volatile registers if /v flag
         if volatile_only and isinstance(results, list):
             results = [g for g in results if g.uses_only_volatile_regs()]
-
-        # Restore clean catalog
-        if use_full_catalog:
-            self._gadgets.use_full_catalog(False)
 
         # Exit handling
         if cmd == "exit" and results is True:
@@ -260,6 +298,7 @@ class Terminal:
             except KeyboardInterrupt:
                 # Control-C pressed - check if buffer has text first
                 if session.app.current_buffer.text:
+                    ctrl_c_count = 0
                     continue
 
                 ctrl_c_count += 1
@@ -269,9 +308,12 @@ class Terminal:
                 else:
                     print("[i] Press Ctrl+C again to exit, or type 'exit'.")
                     continue
-            except SystemExit:
-                # Exit command was called
+            except EOFError:
+                print("[+] End of input.")
                 return 0
+            except SystemExit as error:
+                # Exit command was called
+                return error.code if isinstance(error.code, int) else 1
             except re.error:
                 print("[!] Wrongly typed command")
 
@@ -282,22 +324,25 @@ class Terminal:
             command: Command string read by the REPL.
 
         Returns:
-            Zero on success, or one when regex validation fails.
+            Zero on success, one for no results or invalid input, and 130 when interrupted.
         """
+        real_stdout = sys.stdout
         try:
             # Redirect stdout to stderr during execution so info messages
             # (e.g., "[*] Finding...") don't pollute piped output
-            real_stdout = sys.stdout
             sys.stdout = sys.stderr
             results = self.execute(command)
             sys.stdout = real_stdout
-        except SystemExit:
-            sys.stdout = real_stdout
-            return 0
+        except SystemExit as error:
+            return error.code if isinstance(error.code, int) else 1
+        except KeyboardInterrupt:
+            print("[!] Interrupted.", file=sys.stderr)
+            return 130
         except re.error:
-            sys.stdout = real_stdout
             print("[!] Invalid regex in command", file=sys.stderr)
             return 1
+        finally:
+            sys.stdout = real_stdout
 
         if results:
             results = sorted(results, key=gadgets.sort_key)
@@ -305,7 +350,7 @@ class Terminal:
                 print(self._formatter.format(gadget, self._with_base_address))
             print(f"---- {len(results)} gadget(s)", file=sys.stderr)
 
-        return 0
+        return 0 if results else 1
 
     # ──────────────────────────────────────────────────────────────────
     #  General: Help, exit, clear, list, toggles, style
@@ -641,8 +686,8 @@ class Terminal:
             # Pattern: neg <dest> ; sbb <dest>, <dest> ; and <dest>, <source_reg>
             # This effectively does: dest = source_reg
             neg_sbb_and_pattern = rf"neg (\w+)\s*;\s*sbb \1, \1\s*;\s*and \1, {reg}"
-            if re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE):
-                match = re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE)
+            match = re.search(neg_sbb_and_pattern, gadget.raw, re.IGNORECASE)
+            if match:
                 dest_reg = match.group(1)
 
                 # Find the 'and' instruction

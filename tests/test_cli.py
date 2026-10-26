@@ -7,120 +7,121 @@ import io
 import sys
 
 import pytest
-from ropcatalog.cli import build_parser, main, parse_batch_queries
+from ropcatalog.application.requests import Query
+from ropcatalog.cli import main, parse_arguments, parse_batch_queries
 from ropcatalog.core.gadgets import Gadgets
 
 
-class TestBuildParser:
+class TestArgumentParsing:
     @pytest.fixture
     def parser(self):
-        return build_parser()
+        return parse_arguments
 
     def test_single_path(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.paths == ["gadgets.txt"]
 
     def test_multiple_paths(self, parser):
-        args = parser.parse_args(["file1.txt", "file2.txt", "file3.txt"])
+        args = parser(["file1.txt", "file2.txt", "file3.txt"])
         assert args.paths == ["file1.txt", "file2.txt", "file3.txt"]
 
     def test_bad_characters_short(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-b", r"\x00\x0a"])
+        args = parser(["gadgets.txt", "-b", r"\x00\x0a"])
         assert args.bad_characters == r"\x00\x0a"
 
     def test_bad_characters_long(self, parser):
-        args = parser.parse_args(["gadgets.txt", "--bad-characters", r"\x00"])
+        args = parser(["gadgets.txt", "--bad-characters", r"\x00"])
         assert args.bad_characters == r"\x00"
 
     def test_bad_characters_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.bad_characters == ""
 
     def test_all_flag(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-a"])
+        args = parser(["gadgets.txt", "-a"])
         assert args.all is True
 
     def test_all_flag_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.all is False
 
     def test_style_choices(self, parser):
         for style in ("plain", "python", "js", "cpp"):
-            args = parser.parse_args(["gadgets.txt", "-s", style])
+            args = parser(["gadgets.txt", "-s", style])
             assert args.style == style
 
     def test_style_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.style == "plain"
 
     def test_style_invalid(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "-s", "invalid"])
+            parser(["gadgets.txt", "-s", "invalid"])
 
     def test_offset_flag(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-o"])
+        args = parser(["gadgets.txt", "-o"])
         assert args.offset is True
 
     def test_offset_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.offset is False
 
     def test_encoding(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-e", "utf-16"])
+        args = parser(["gadgets.txt", "-e", "utf-16"])
         assert args.encoding == "utf-16"
 
     def test_encoding_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.encoding is None
 
     def test_virtual_addresses_cannot_use_offset(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "--address-kind", "va", "--offset"])
+            parser(["gadgets.txt", "--address-kind", "va", "--offset"])
 
     def test_stdin_module_requires_stdin(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "--stdin-module", "libc.so.6"])
+            parser(["gadgets.txt", "--stdin-module", "libc.so.6"])
 
     def test_command(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-c", "pivot reg"])
+        args = parser(["gadgets.txt", "-c", "pivot reg"])
         assert args.command == "pivot reg"
 
     def test_command_default(self, parser):
-        args = parser.parse_args(["gadgets.txt"])
+        args = parser(["gadgets.txt"])
         assert args.command is None
 
     def test_repeatable_queries(self, parser):
-        args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "-q", "pivot reg"])
+        args = parser(["gadgets.txt", "-q", "pop rdi", "-q", "pivot reg"])
         assert args.query == ["pop rdi", "pivot reg"]
 
     def test_batch_and_jsonl(self, parser):
-        args = parser.parse_args(["gadgets.txt", "--batch", "queries.txt", "--jsonl"])
+        args = parser(["gadgets.txt", "--batch", "queries.txt", "--jsonl"])
         assert args.batch == "queries.txt"
         assert args.jsonl is True
 
     def test_artifact_dir(self, parser, tmp_path):
-        args = parser.parse_args(["gadgets.txt", "-q", "pop rdi", "--jsonl", "--artifact-dir", str(tmp_path)])
+        args = parser(["gadgets.txt", "-q", "pop rdi", "--jsonl", "--artifact-dir", str(tmp_path)])
         assert args.artifact_dir == tmp_path
 
     def test_catalog_out(self, parser, tmp_path):
-        args = parser.parse_args(["gadgets.txt", "--catalog-out", str(tmp_path / "lib.ropcatalog")])
+        args = parser(["gadgets.txt", "--catalog-out", str(tmp_path / "lib.ropcatalog")])
         assert args.catalog_out == tmp_path / "lib.ropcatalog"
 
     def test_capabilities_requires_no_path(self, parser):
-        args = parser.parse_args(["--capabilities"])
+        args = parser(["--capabilities"])
         assert args.capabilities is True
 
     def test_serve(self, parser):
-        args = parser.parse_args(["gadgets.ropcatalog", "--serve"])
+        args = parser(["gadgets.ropcatalog", "--serve"])
         assert args.serve is True
 
     def test_fields_requires_machine_output(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "-q", "ret", "--fields", "id,address"])
+            parser(["gadgets.txt", "-q", "ret", "--fields", "id,address"])
 
     def test_catalog_out_rejects_query_options(self, parser, tmp_path):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "-q", "ret", "--catalog-out", str(tmp_path / "catalog")])
+            parser(["gadgets.txt", "-q", "ret", "--catalog-out", str(tmp_path / "catalog")])
 
     @pytest.mark.parametrize("query_modes", [
         ["-c", "pivot reg", "-q", "pop rdi ; ret"],
@@ -129,7 +130,7 @@ class TestBuildParser:
     ])
     def test_query_modes_are_mutually_exclusive(self, parser, query_modes):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", *query_modes])
+            parser(["gadgets.txt", *query_modes])
 
     @pytest.mark.parametrize("arguments", [
         ["--jsonl"],
@@ -139,20 +140,20 @@ class TestBuildParser:
     ])
     def test_output_modes_require_dependencies(self, parser, arguments):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", *arguments])
+            parser(["gadgets.txt", *arguments])
 
     @pytest.mark.parametrize("limit", ["0", "-1"])
     def test_limit_must_be_positive(self, parser, limit):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", "-q", "pop rdi ; ret", "--limit", limit])
+            parser(["gadgets.txt", "-q", "pop rdi ; ret", "--limit", limit])
 
     @pytest.mark.parametrize("query_mode", ["-c", "-q", "--batch"])
     def test_query_mode_value_must_not_be_empty(self, parser, query_mode):
         with pytest.raises(SystemExit):
-            parser.parse_args(["gadgets.txt", query_mode, ""])
+            parser(["gadgets.txt", query_mode, ""])
 
     def test_combined_args(self, parser):
-        args = parser.parse_args([
+        args = parser([
             "gadgets.txt", "other.txt",
             "-b", r"\x00\x0a",
             "-a",
@@ -171,7 +172,7 @@ class TestBuildParser:
 
     def test_no_paths_fails(self, parser):
         with pytest.raises(SystemExit):
-            parser.parse_args([])
+            parser([])
 
     @pytest.mark.parametrize("arguments", [
         ["-"],
@@ -180,10 +181,23 @@ class TestBuildParser:
     ])
     def test_stdin_rejects_ambiguous_modes(self, parser, arguments):
         with pytest.raises(SystemExit):
-            parser.parse_args(arguments)
+            parser(arguments)
 
 
 class TestBatchMode:
+    def test_keyboard_interrupt_returns_130(self, tmp_path, monkeypatch, capsys):
+        catalog = tmp_path / "libc.txt"
+        catalog.write_text("0x1: ret\n", encoding="utf-8")
+
+        def interrupt(**kwargs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("ropcatalog.cli.gadgets.Gadgets", interrupt)
+        monkeypatch.setattr(sys, "argv", ["ropcatalog", str(catalog), "-q", "ret", "--jsonl"])
+
+        assert main() == 130
+        assert "Interrupted" in capsys.readouterr().err
+
     def test_ropgadget_stdin_jsonl(self, monkeypatch, capsys):
         monkeypatch.setattr(sys, "stdin", io.StringIO(
             "Gadgets information\n"
@@ -228,12 +242,13 @@ class TestBatchMode:
         )
 
         queries = parse_batch_queries(str(batch))
+        parsed_queries = [query for query in queries if isinstance(query, Query)]
 
-        assert [(query.identifier, query.command) for query in queries] == [
+        assert [(query.identifier, query.command) for query in parsed_queries] == [
             ("3", "pop rdi ; ret"),
             ("pivot", "pivot reg"),
         ]
-        assert [query.raw_gadget for query in queries] == [True, False]
+        assert [query.raw_gadget for query in parsed_queries] == [True, False]
 
     def test_json_query_requires_one_mode(self, tmp_path):
         batch = tmp_path / "queries.jsonl"
@@ -308,7 +323,7 @@ class TestBatchMode:
             "ropcatalog", str(catalog), "--batch", str(batch), "--jsonl",
         ])
 
-        assert main() == 0
+        assert main() == 1
 
         record = json.loads(capsys.readouterr().out)
         assert record["failure"] == "constraints_rejected_all"

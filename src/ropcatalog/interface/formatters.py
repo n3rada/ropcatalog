@@ -1,8 +1,10 @@
-# ropcatalog/core/formatters.py
+# ropcatalog/interface/formatters.py
 
 # Built-in imports
 import re
-from .gadgets import Gadget
+
+# Local library imports
+from ..core.gadgets import Gadget
 
 class GadgetFormatter:
     def format(self, gadget: Gadget, with_base_address: bool = False) -> str:
@@ -81,7 +83,7 @@ class JavaScriptFormatter(GadgetFormatter):
             """
             return ''.join(word.capitalize() for word in re.split(r'\W|_', name))
         
-        camel_module = to_camel_case(gadget.module)
+        camel_module = to_camel_case(gadget.module or "unknown")
         base = f"g{camel_module}Base + " if with_base_address else ""
         
         # JavaScript always uses 8-byte pointers for writePtr

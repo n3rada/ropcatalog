@@ -3,10 +3,9 @@
 """Tests for Terminal command dispatch and execution logic."""
 
 import pytest
-from unittest.mock import MagicMock
-from ropcatalog.core.gadgets import Gadget, Gadgets
-from ropcatalog.core.terminal import Terminal, requires_arg
-from ropcatalog.core.formatters import PlainFormatter
+from ropcatalog.core.gadgets import Gadget
+from ropcatalog.interface.terminal import Terminal, requires_arg
+from ropcatalog.interface.formatters import PlainFormatter
 
 
 class FakeCatalog:
@@ -41,6 +40,22 @@ def _make_terminal(gadgets_raw, arch="x86"):
 
 
 class TestDispatch:
+    def test_no_match_returns_one(self):
+        term = _make_terminal([])
+
+        assert term.run_command("? ret") == 1
+
+    def test_interrupted_command_returns_130(self, monkeypatch, capsys):
+        term = _make_terminal([])
+
+        def interrupt(command):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(term, "execute", interrupt)
+
+        assert term.run_command("? ret") == 130
+        assert "Interrupted" in capsys.readouterr().err
+
     def test_unrecognized_command(self, capsys):
         term = _make_terminal([])
         result = term.execute("nonexistent_cmd")
@@ -291,7 +306,7 @@ class TestHelpAndToggles:
     def test_change_style(self, capsys):
         term = _make_terminal([])
         term.execute("style python")
-        from ropcatalog.core.formatters import PythonFormatter
+        from ropcatalog.interface.formatters import PythonFormatter
 
         assert isinstance(term._formatter, PythonFormatter)
 
@@ -302,7 +317,7 @@ class TestRequiresArgDecorator:
         def sample_cmd(self, arg):
             pass
 
-        assert sample_cmd._requires_arg is True
+        assert getattr(sample_cmd, "_requires_arg") is True
 
     def test_undecorated_has_no_flag(self):
         def sample_cmd(self, arg):

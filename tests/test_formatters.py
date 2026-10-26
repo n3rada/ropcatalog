@@ -4,7 +4,7 @@
 
 import pytest
 from ropcatalog.core.gadgets import Gadget
-from ropcatalog.core.formatters import (
+from ropcatalog.interface.formatters import (
     PlainFormatter,
     PythonFormatter,
     CppFormatter,

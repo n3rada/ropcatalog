@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from ropcatalog.core.gadgets import Gadgets
-from ropcatalog.core.terminal import Terminal
+from ropcatalog.interface.terminal import Terminal
 
 
 EXAMPLES = Path(__file__).parents[1] / "examples" / "windows-11-enterprise-10.0.22631"
